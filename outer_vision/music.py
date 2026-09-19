@@ -20,6 +20,16 @@ def midi(note: str):
     return n + 12 * (int(m.group(3)) + 1)
 
 
+NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+SCALE_MIDI = [60, 62, 64, 65, 67, 69, 71, 72]           # C major, C4..C5 (the default table)
+SONGS = {   # fallback lessons when OMNI is unreachable
+    "Twinkle Twinkle": ["C4", "C4", "G4", "G4", "A4", "A4", "G4", "F4", "F4", "E4", "E4", "D4", "D4", "C4"],
+    "Mary Had a Little Lamb": ["E4", "D4", "C4", "D4", "E4", "E4", "E4", "D4", "D4", "D4", "E4", "G4", "G4"],
+    "Ode to Joy": ["E4", "E4", "F4", "G4", "G4", "F4", "E4", "D4", "C4", "C4", "D4", "E4", "E4", "D4", "D4"],
+    "Hot Cross Buns": ["E4", "D4", "C4", "E4", "D4", "C4", "C4", "C4", "D4", "D4", "E4", "D4", "C4"],
+}
+
+
 def key_of(color, shape):
     return f"{color}/{shape}"
 
@@ -83,10 +93,10 @@ class Music:
             self.overrides.setdefault(key_of(b[0]["color"], b[0]["shape"]), {})["note"] = va["note"]
             return f"swapped {a[0]['id']} <-> {b[0]['id']}"
         if kind == "start_lesson":
-            notes = [n for n in action.get("notes", []) if midi(str(n)) is not None]
-            playable = {self.voice_of(o["color"], o["shape"])["note"] for o in objects.values()}
-            missing = sorted({n for n in notes if n not in playable})
-            notes = [n for n in notes if n in playable]
+            notes = [str(n) for n in action.get("notes", []) if midi(str(n)) is not None]
+            playable = {self.voice_of(o["color"], o["shape"])["midi"] for o in objects.values()}
+            missing = sorted({n for n in notes if midi(n) not in playable})
+            notes = [n for n in notes if midi(n) in playable]
             if not notes:
                 return "ignored: none of the lesson's notes are on the table"
             self.lesson = {"title": str(action.get("title", "lesson"))[:60], "notes": notes, "index": 0}
@@ -118,7 +128,7 @@ class Music:
         exp = self.expected_note()
         if exp is None:
             return None
-        ok = obj.get("note") == exp
+        ok = obj.get("note") is not None and midi(obj["note"]) == midi(exp)   # F#4 == Gb4
         if ok:
             self.lesson["index"] += 1
         done = self.lesson["index"] >= len(self.lesson["notes"])
@@ -127,6 +137,32 @@ class Music:
         if done:
             self.lesson = None
         return fb
+
+    # ------------------------------------------------------------------ offline defaults
+    def default_action(self, command: dict, objects: dict, dwell_s: float):
+        """What a blink command does when OMNI can't be reached: (action, spoken line). Always valid."""
+        kind, target = command.get("command"), command.get("target")
+        o = objects.get(target)
+        if kind == "change_instrument" and o is not None:
+            cur = self.voice_of(o["color"], o["shape"])["instrument"]
+            inst = self.available[(self.available.index(cur) + 1) % len(self.available)] if cur in self.available else self.available[0]
+            return {"type": "set_instrument", "target": target, "instrument": inst}, f"That one plays {inst} now."
+        if kind == "change_note" and o is not None:
+            cur = midi(self.voice_of(o["color"], o["shape"])["note"] or "C4")
+            nxt = next((m for m in SCALE_MIDI if m > cur), SCALE_MIDI[0])      # next C-major note, wraps
+            note = NOTE_NAMES[nxt % 12] + str(nxt // 12 - 1)
+            return {"type": "set_note", "target": target, "note": note}, f"That one plays {note} now."
+        if kind == "faster":
+            s = max(0.2, round(dwell_s * 0.75, 2))
+            return {"type": "set_dwell", "seconds": s}, "A bit faster now."
+        if kind == "slower":
+            s = min(1.5, round(dwell_s * 1.33, 2))
+            return {"type": "set_dwell", "seconds": s}, "A bit slower now."
+        if kind == "teach":
+            playable = {self.voice_of(v["color"], v["shape"])["midi"] for v in objects.values()}
+            title, notes = max(SONGS.items(), key=lambda kv: sum(midi(n) in playable for n in kv[1]) / len(kv[1]))
+            return {"type": "start_lesson", "title": title, "notes": notes}, f"Let's learn {title}. Follow the circle."
+        return None, "Sorry, I couldn't do that."
 
     def state(self):
         return {

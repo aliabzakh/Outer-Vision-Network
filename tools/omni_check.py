@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""One-shot check of the OMNI API before the demo: sends the synthetic table + a question, prints the
-parsed reply, and speaks it in the model's voice.
+"""One-shot check of the OMNI API before the demo: sends the synthetic table + a blink command, prints
+OMNI's decision and whether it fits the command, and speaks the reply in the model's voice.
 
-  export OMNI_API_KEY=...        # from the Huawei OMNI Live credits (yibuapi)
-  python tools/omni_check.py "what can I play here?"
-  python tools/omni_check.py --wav question.wav        # test with a real spoken question
+  python tools/omni_check.py                          # change_instrument on the green cylinder
+  python tools/omni_check.py teach
+  python tools/omni_check.py faster --no-voice
+Commands: change_instrument | change_note | faster | slower | teach. Needs OMNI_API_KEY (env or .env).
 """
 import argparse
 import base64
@@ -20,37 +21,44 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from outer_vision import config, omni, synthetic  # noqa: E402
 from outer_vision.music import Music  # noqa: E402
 
+ROOT = Path(__file__).resolve().parents[1]
 ap = argparse.ArgumentParser()
-ap.add_argument("text", nargs="?", default="What can I play here, and what does the green one sound like?")
-ap.add_argument("--wav", help="spoken question instead of text")
+ap.add_argument("command", nargs="?", default="change_instrument", choices=sorted(omni.ALLOWED))
+ap.add_argument("--target", type=int, default=4, help="object id for change_instrument / change_note")
 ap.add_argument("--no-voice", action="store_true")
 args = ap.parse_args()
 
-cfg = config.load("config.json")
+config.load_env(ROOT / ".env")
+cfg = config.load(str(ROOT / "config.json"))
 o = cfg["omni"]
 if not os.environ.get("OMNI_API_KEY"):
-    sys.exit("set OMNI_API_KEY first")
+    sys.exit("set OMNI_API_KEY (env or .env) first")
 client = omni.OmniClient(os.environ.get("OMNI_BASE_URL", o["base_url"]), os.environ["OMNI_API_KEY"],
-                         os.environ.get("OMNI_MODEL", o["model"]), os.environ.get("OMNI_VOICE", o["voice"]))
+                         os.environ.get("OMNI_MODEL", o["model"]), os.environ.get("OMNI_VOICE", o["voice"]),
+                         timeout=o["timeout_s"])
 music = Music(cfg)
-img = synthetic.render(0)
-objs = {i + 1: {"id": i + 1, "color": c, "shape": s, **music.voice_of(c, s)} for i, (c, s, *_) in enumerate(synthetic.DEFAULT_OBJECTS)}
-jpg = cv2.imencode(".jpg", img)[1].tobytes()
-content = [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpg).decode()}}]
-if args.wav:
-    content.append({"type": "input_audio", "input_audio": {"data": "data:;base64," + base64.b64encode(Path(args.wav).read_bytes()).decode(), "format": "wav"}})
-else:
-    content.append({"type": "text", "text": "USER SAID: " + args.text})
-content.append({"type": "text", "text": "SCENE " + json.dumps({"objects": list(objs.values()), "focus": 4,
-                                                               "available_instruments": music.available})})
-msgs = [{"role": "system", "content": omni.UNDERSTAND_PROMPT.replace("AVAILABLE_INSTRUMENTS", "/".join(music.available))},
-        {"role": "user", "content": content}]
+objs = {i + 1: {"id": i + 1, "color": c, "shape": s, **music.voice_of(c, s)}
+        for i, (c, s, *_) in enumerate(synthetic.DEFAULT_OBJECTS)}
+command = {"command": args.command}
+if args.command in ("change_instrument", "change_note"):
+    command["target"] = args.target
+jpg = cv2.imencode(".jpg", synthetic.render(0))[1].tobytes()
+scene = {"objects": list(objs.values()), "dwell_s": 0.5, "available_instruments": music.available,
+         "lesson": None, "recent": [{"note": "C4", "best_guess": False, "ago_s": 3.1},
+                                    {"note": "E4", "best_guess": False, "ago_s": 2.2}]}
+msgs = [{"role": "system", "content": omni.DECIDE_PROMPT.replace("AVAILABLE_INSTRUMENTS", "/".join(music.available))},
+        {"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpg).decode()}},
+            {"type": "text", "text": "COMMAND " + json.dumps(command)},
+            {"type": "text", "text": "SCENE " + json.dumps(scene)}]}]
+print(f"{client.model} via {client.url}\ncommand: {command}")
 t0 = time.monotonic()
 text = "".join(d for k, d in client.stream(msgs) if k == "text")
-print(f"understand: {time.monotonic() - t0:.2f}s\n{text}\n")
+print(f"decide: {time.monotonic() - t0:.2f}s\n{text}\n")
 reply = omni.parse_reply(text)
 for a in reply["actions"]:
-    print("action:", a, "->", music.apply(a, objs))
+    ok = omni.fits(command, a, objs, music, 0.5)
+    print("action:", a, "| fits command:", ok, "->", music.apply(a, objs) if ok else "(would fall back)")
 if not args.no_voice:
     from outer_vision.audio import Player
     p = Player()

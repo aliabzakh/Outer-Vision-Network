@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from pathlib import Path
 
 DEFAULTS = {
@@ -82,11 +83,27 @@ DEFAULTS = {
         "base_url": "https://yibuapi.com/v1",
         "model": "qwen3.5-omni-flash",
         "voice": "Cherry",
-        "speak_with": "omni",          # "omni" (model's own voice) | "local" (macOS `say`) | "none"
-        "trigger": ["key", "marker"],  # "key" = press v; "marker" = dwell on the talk marker; "vad" = always listening
-        "talk_marker_id": 7,           # ArUco id of the printed "talk" card (tools/make_marker.py --id 7)
-        "max_utterance_s": 8.0,
+        "speak_with": "omni",          # "omni" (model's own voice) | "fallback" (ElevenLabs/local) | "none"
+        "timeout_s": 10.0,             # after this the command falls back to the offline default
         "history_turns": 6,
+    },
+    "blink": {
+        # Deliberate blinks from the eye tracker's eye state (INTERFACE.md). Natural blinks are ~0.1-0.4 s.
+        "short_max_s": 0.4,            # shorter = natural blink (two of them = double blink = cancel)
+        "long_min_s": 0.6,             # long blink / wink = select
+        "long_max_s": 2.0,             # longer = resting the eyes, ignored
+        "double_gap_s": 0.7,           # max gap between the two blinks of a double blink
+        "side_frac": 0.7,              # an eye counts as closed if closed for this share of the closure
+        "max_sample_gap_s": 0.25,      # tracker silent this long mid-closure -> drop the closure
+    },
+    "menu": {
+        "timeout_s": 8.0,              # menu closes if nothing is chosen
+    },
+    "eleven": {
+        # ElevenLabs, key from env ELEVENLABS_API_KEY. Used by tools/gen_audio.py (samples, prompts) and as
+        # live fallback speech. voice_id: premade "Rachel"; override with env ELEVENLABS_VOICE_ID.
+        "voice_id": "21m00Tcm4TlvDq8ikWAM",
+        "tts_model": "eleven_flash_v2_5",
     },
     "gaze_udp_port": 5005,
     "events": {"host": "127.0.0.1", "port": 5006},
@@ -102,6 +119,18 @@ def _merge(base: dict, over: dict) -> dict:
         else:
             out[k] = copy.deepcopy(v)  # colours replace wholesale so removed colours stay removed
     return out
+
+
+def load_env(path=".env") -> None:
+    """KEY=value lines into os.environ (existing variables win). Keeps API keys out of config.json and git."""
+    p = Path(path)
+    if not p.exists():
+        return
+    for line in p.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip().removeprefix("export ").strip(), v.strip().strip("'\""))
 
 
 def load(path: str | None) -> dict:

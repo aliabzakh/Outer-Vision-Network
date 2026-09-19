@@ -1,6 +1,7 @@
 """Frame sources, gaze inputs, event output, recording, calibration-marker detection."""
 from __future__ import annotations
 
+import collections
 import json
 import socket
 import threading
@@ -12,6 +13,7 @@ import cv2
 import numpy as np
 
 from . import synthetic
+from .blink import BlinkDetector
 
 
 # ---------------------------------------------------------------- frame sources
@@ -103,15 +105,22 @@ def open_source(spec: str):
 
 # ---------------------------------------------------------------- gaze inputs
 # All gaze is normalized world-camera coordinates: x, y in [0, 1], origin top-left. See INTERFACE.md.
+# Every source also answers eyes_closed() (freeze dwell) and gestures() (deliberate blinks, see blink.py).
 class NoGaze:
     name = "none"
 
     def get(self, frame_idx):
         return None
 
+    def eyes_closed(self, frame_idx):
+        return False
 
-class MouseGaze:
-    """Mouse position over the debug window stands in for gaze."""
+    def gestures(self, frame_idx):
+        return []
+
+
+class MouseGaze(NoGaze):
+    """Mouse position over the debug window stands in for gaze (blinks: keys 1/2/3/x in run.py)."""
     name = "mouse"
 
     def __init__(self):
@@ -125,14 +134,19 @@ class MouseGaze:
         return self.pos
 
 
-class UdpGaze:
-    """Listens for gaze JSON from the inner-camera process. Stale samples count as no gaze."""
+class UdpGaze(NoGaze):
+    """Listens for gaze JSON from the inner-camera process. Stale samples count as no gaze.
+    Eye state (left_closed / right_closed, else valid:false = both closed) feeds a BlinkDetector here, at
+    the tracker's full sample rate, so blink timing doesn't depend on the camera frame rate."""
     name = "udp"
 
-    def __init__(self, port: int, max_age_s: float):
+    def __init__(self, port: int, max_age_s: float, blink_cfg: dict):
         self.max_age = max_age_s
         self.latest = None       # (x, y, recv_monotonic)
         self.count = 0
+        self.blink = BlinkDetector(blink_cfg)
+        self._gestures = collections.deque()
+        self._last_sample = 0.0
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("0.0.0.0", port))
         threading.Thread(target=self._loop, daemon=True).start()
@@ -142,10 +156,19 @@ class UdpGaze:
             data, _ = self.sock.recvfrom(4096)
             try:
                 g = json.loads(data)
-                if g.get("valid", True):
-                    self.latest = (float(g["x"]), float(g["y"]), time.monotonic())
+                now = time.monotonic()
+                valid = bool(g.get("valid", True))
+                if valid:
+                    self.latest = (float(g["x"]), float(g["y"]), now)
                 else:
                     self.latest = None
+                lc, rc = g.get("left_closed"), g.get("right_closed")
+                if lc is None and rc is None:
+                    lc = rc = not valid           # no per-eye state: invalid gaze = both eyes closed
+                elif lc is None or rc is None:
+                    lc = rc = bool(lc if rc is None else rc)   # one eye tracked: can't tell a wink from a blink
+                self._gestures.extend(self.blink.feed(now, bool(lc), bool(rc)))
+                self._last_sample = now
                 self.count += 1
             except (ValueError, KeyError, TypeError):
                 pass
@@ -160,25 +183,44 @@ class UdpGaze:
         g = self.latest
         return None if g is None else round((time.monotonic() - g[2]) * 1000, 1)
 
+    def eyes_closed(self, frame_idx):
+        return self.blink.closed and time.monotonic() - self._last_sample < self.max_age
 
-class ReplayGaze:
-    """Gaze from a recording's log.jsonl, matched by frame index."""
+    def gestures(self, frame_idx):
+        out = []
+        while self._gestures:
+            out.append(self._gestures.popleft())
+        return out
+
+
+class ReplayGaze(NoGaze):
+    """Gaze, eye state and blink gestures from a recording's log.jsonl, matched by frame index."""
     name = "replay"
 
     def __init__(self, log_path):
-        self.by_frame = {}
+        self.by_frame, self.closed, self.gest = {}, set(), {}
         with open(log_path) as f:
             for line in f:
                 r = json.loads(line)
                 if "frame" in r:
                     self.by_frame[r["frame"]] = r.get("gaze")
+                    if r.get("eyes_closed"):
+                        self.closed.add(r["frame"])
+                    if r.get("gestures"):
+                        self.gest[r["frame"]] = r["gestures"]
+
+    def eyes_closed(self, frame_idx):
+        return frame_idx in self.closed
+
+    def gestures(self, frame_idx):
+        return self.gest.get(frame_idx, [])
 
     def get(self, frame_idx):
         g = self.by_frame.get(frame_idx)
         return tuple(g) if g else None
 
 
-class SyntheticGaze:
+class SyntheticGaze(NoGaze):
     name = "synthetic"
 
     def get(self, frame_idx):
@@ -191,7 +233,7 @@ def open_gaze(spec: str, cfg: dict):
     if spec == "mouse":
         return MouseGaze()
     if spec == "udp":
-        return UdpGaze(cfg["gaze_udp_port"], cfg["selector"]["gaze_max_age_s"])
+        return UdpGaze(cfg["gaze_udp_port"], cfg["selector"]["gaze_max_age_s"], cfg["blink"])
     if spec == "synthetic":
         return SyntheticGaze()
     if spec.startswith("replay:"):

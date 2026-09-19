@@ -15,6 +15,13 @@ class Selector:
         self.progress = 0.0
         self.pending_id = None      # what gaze is on while the grace period for the old target runs
         self.pending_since = 0.0
+        self.held_since = None      # eyes closed: dwell frozen, target kept
+
+    def hold(self, now: float):
+        """Eyes are closed (blink or blink gesture): freeze dwell and keep the target instead of letting the
+        grace period drop it. Dwell resumes where it was when the eyes open."""
+        if self.held_since is None:
+            self.held_since = now
 
     def _candidate(self, tracks: list, gaze_px, frame_w: int):
         """Closest object outline to the gaze point; returns (track, is_best_guess) or (None, False)."""
@@ -39,6 +46,12 @@ class Selector:
 
     def update(self, tracks: list, gaze_px, now: float, frame_w: int) -> list:
         """Returns a list of events (currently only lock events) produced on this frame."""
+        if self.held_since is not None:
+            d = now - self.held_since
+            self.dwell_start += d
+            self.last_on += d
+            self.pending_since += d
+            self.held_since = None
         cand, guess = self._candidate(tracks, gaze_px, frame_w)
         events = []
         if cand is not None and cand.id == self.target_id:

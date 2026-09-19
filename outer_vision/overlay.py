@@ -15,9 +15,9 @@ def _text(img, s, org, scale=0.45, color=(255, 255, 255)):
 
 
 def draw(frame, tracks, depth, cfg, gaze_px, selector, hud_lines, flash_id=None, markers=(), show_features=False,
-         voices=None, next_id=None, talk=None, caption=None, t=0.0):
-    """voices: id -> {note, instrument}; next_id: lesson's next object; talk: (marker, progress) of the
-    talk card; caption: (status, text) from the voice assistant."""
+         voices=None, next_id=None, menu_focus=None, caption=None, t=0.0):
+    """voices: id -> {note, instrument}; next_id: lesson's next object; menu_focus: object the open blink
+    menu is about; caption: (status, text) from the blink menu / Maestro."""
     img = frame.copy()
     voices = voices or {}
     t_now = t
@@ -53,6 +53,8 @@ def draw(frame, tracks, depth, cfg, gaze_px, selector, hud_lines, flash_id=None,
             r = int(max(w, h) * 0.75) + 10 + int(4 * np.sin(t_now * 6))
             cv2.circle(img, (int(t.cx), int(t.cy)), r, (255, 255, 255), 2, cv2.LINE_AA)
             _text(img, "next", (int(t.cx) - 14, int(t.cy) - r - 4), 0.5)
+        if t.id == menu_focus:   # the object the blink menu is about
+            cv2.rectangle(img, (x - 6, y - 6), (x + w + 6, y + h + 6), (255, 0, 255), 2, cv2.LINE_AA)
         if is_target and selector.progress > 0:
             c = (int(t.cx), int(t.cy))
             r = int(max(w, h) * 0.6) + 6
@@ -61,13 +63,8 @@ def draw(frame, tracks, depth, cfg, gaze_px, selector, hud_lines, flash_id=None,
                         (0, 255, 0) if done else (0, 255, 255), 3, cv2.LINE_AA)
     for m in markers:
         pts = np.array(m["corners"], np.int32)
-        is_talk = talk is not None and talk[0] is m
-        cv2.polylines(img, [pts], True, (0, 200, 255) if is_talk else (255, 0, 255), 2)
-        _text(img, "TALK" if is_talk else f"marker {m['id']}", tuple(pts[0]), color=(0, 200, 255) if is_talk else (255, 0, 255))
-        if is_talk and talk[1] > 0:
-            c = tuple(pts.mean(0).astype(int))
-            r = int(np.linalg.norm(pts[0] - pts[2]) * 0.6)
-            cv2.ellipse(img, c, (r, r), -90, 0, 360 * talk[1], (0, 200, 255), 3, cv2.LINE_AA)
+        cv2.polylines(img, [pts], True, (255, 0, 255), 2)
+        _text(img, f"marker {m['id']}", tuple(pts[0]), color=(255, 0, 255))
     if gaze_px is not None:
         g = (int(gaze_px[0]), int(gaze_px[1]))
         cv2.circle(img, g, 9, (255, 255, 255), 2, cv2.LINE_AA)
@@ -80,10 +77,10 @@ def draw(frame, tracks, depth, cfg, gaze_px, selector, hud_lines, flash_id=None,
         bar = img.copy()
         cv2.rectangle(bar, (0, H - 46), (W, H), (0, 0, 0), -1)
         img = cv2.addWeighted(bar, 0.55, img, 0.45, 0)
-        dot = {"listening": (0, 0, 255), "thinking": (0, 200, 255), "speaking": (0, 220, 0)}.get(status, (160, 160, 160))
+        dot = {"menu": (255, 0, 255), "thinking": (0, 200, 255), "speaking": (0, 220, 0)}.get(status, (160, 160, 160))
         cv2.circle(img, (16, H - 23), 7, dot, -1, cv2.LINE_AA)
         _text(img, status.upper(), (30, H - 28), 0.45, dot)
-        _text(img, text[:90], (30, H - 10), 0.45)
+        _text(img, text[:100], (30, H - 10), 0.45)
     return img
 
 

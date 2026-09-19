@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Outer vision: world camera -> objects -> gaze target -> dwell -> note events (+ Maestro voice assistant).
+"""Outer vision: world camera -> objects -> gaze target -> dwell -> note events, plus Maestro (blink menu + OMNI).
 
 Examples:
   python run.py --source synthetic --gaze synthetic                  # no hardware at all
-  python run.py --source 0 --gaze mouse --omni                       # webcam, mouse = gaze, voice assistant
-  python run.py --source http://pi.local:8081/stream --gaze udp       # Pi camera streamed to the Mac
+  python run.py --source 0 --gaze mouse                              # webcam, mouse = gaze, keys 1/2/3/x = blinks
   python run.py --source recordings/X/world.mp4 --gaze replay:recordings/X/log.jsonl
   python run.py --source http://192.168.2.2:8081/stream --gaze udp --stream 8080      # Pi camera -> laptop
   python run.py --source picam --gaze udp --headless --stream 8080                     # everything on the Pi
 
-Keys: q quit | v talk to Maestro | m colour view | f features | r record | c depth-calibrate | p pause | s snapshot
-Env:  OMNI_API_KEY (voice assistant), SENTRY_DSN (tracing/logs, optional)
+Keys: q quit | 1/2/3 long blink left/right/both | x double blink | m colour view | f features | r record
+      c depth-calibrate | p pause | s snapshot
+Env (or .env): OMNI_API_KEY (Maestro's decisions + voice), ELEVENLABS_API_KEY (fallback voice), SENTRY_DSN (optional)
 """
 from __future__ import annotations
 
@@ -23,12 +23,17 @@ import cv2
 
 from outer_vision import config, overlay, shape_net, telemetry
 from outer_vision.detector import Detector
+from outer_vision.eleven import Eleven
 from outer_vision.io import CalibMarker, MjpegServer, MouseGaze, Publisher, Recorder, open_gaze, open_source
+from outer_vision.menu import Menu
 from outer_vision.music import Music
+from outer_vision.omni import Assistant
 from outer_vision.selector import Selector
 from outer_vision.tracker import Tracker, estimate_depth, reference_sizes
+from outer_vision.voice import Voice
 
 WIN = "outer-vision"
+KEY_BLINKS = {ord("1"): "left", ord("2"): "right", ord("3"): "both"}
 
 
 def obj_json(t, depth, w, h):
@@ -42,11 +47,6 @@ def obj_json(t, depth, w, h):
         "volume": None if vol is None else round(vol, 3),
         "partial": t.det.partial,
     }
-
-
-def point_in(poly, pt):
-    import numpy as np
-    return pt is not None and cv2.pointPolygonTest(np.array(poly, np.float32), (float(pt[0]), float(pt[1])), False) >= 0
 
 
 def main():
@@ -64,10 +64,14 @@ def main():
     ap.add_argument("--realtime", action="store_true", help="pace file/synthetic sources to their fps")
     ap.add_argument("--stream", type=int, default=0, help="serve the debug overlay as MJPEG on this port")
     ap.add_argument("--no-net", action="store_true", help="ignore the shape net; contour rules only")
-    ap.add_argument("--omni", action="store_true", help="enable the Maestro voice assistant (mic + speaker)")
+    ap.add_argument("--offline", action="store_true", help="never call OMNI; blink commands use the built-in defaults")
+    ap.add_argument("--no-audio", action="store_true", help="no speaker: menu prompts and replies are shown, not spoken")
     args = ap.parse_args()
 
+    config.load_env()
     cfg = config.load(args.config)
+    if args.no_audio:
+        cfg["omni"]["speak_with"] = "none"
     if args.no_net:
         cfg["shape_net"]["enabled"] = False
     tele = telemetry.init()
@@ -81,40 +85,46 @@ def main():
     pub = Publisher(host, int(port))
     rec = Recorder(fps=src.fps, cfg=cfg) if args.record else None
     stream = MjpegServer(args.stream) if args.stream else None
+    marker = CalibMarker(cfg["calib_marker"]["dictionary"]) if args.calib_marker else None
     print(f"[shape] {backend}  [sentry] {'on' if tele else 'off'}", flush=True)
     if stream:
         print(f"[stream] http://0.0.0.0:{args.stream}/", flush=True)
 
-    ocfg = cfg["omni"]
-    triggers = set(ocfg["trigger"])
-    use_markers = args.calib_marker or (args.omni and "marker" in triggers)
-    marker = CalibMarker(cfg["calib_marker"]["dictionary"]) if use_markers else None
+    # ---- Maestro: blink menu -> OMNI decides (offline defaults if unreachable) -> speech. No microphone.
+    log = lambda m: print(m, flush=True)  # noqa: E731
+    latest = {}                                   # newest scene, read by the assistant thread
+    recent = collections.deque(maxlen=12)         # notes just played, so OMNI can judge "faster"/"slower"
+    player = None
+    if not args.no_audio:
+        try:
+            from outer_vision.audio import Player
+            player = Player()
+        except Exception as e:                   # no output device: prompts fall back to local TTS
+            log(f"[audio] no speaker ({e})")
+    voice = Voice(player, Eleven(cfg), log=log)
 
-    # Latest scene, shared with the assistant thread (it renders its own annotated snapshot on demand).
-    latest = {}
-    focus_counts = collections.Counter()
-    assistant = mic = None
-    if args.omni:
-        from outer_vision.audio import Mic, Player
-        from outer_vision.omni import Assistant
+    def context():
+        s = dict(latest)
+        voices = {tid: music.voice_of(o["color"], o["shape"]) for tid, o in s["objects"].items()}
+        img = overlay.draw(s["frame"], s["tracks"], s["depth"], cfg, s["gaze_px"], sel, [], voices=voices)
+        ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        now = time.monotonic()
+        return {"jpeg": jpg.tobytes(), "objects": {tid: {**o, **voices[tid]} for tid, o in s["objects"].items()},
+                "selector": sel,
+                "recent": [{**{k: v for k, v in r.items() if k != "at"}, "ago_s": round(now - r["at"], 1)} for r in recent]}
 
-        def context():
-            s = dict(latest)
-            voices = {tid: music.voice_of(o["color"], o["shape"]) for tid, o in s["objects"].items()}
-            img = overlay.draw(s["frame"], s["tracks"], s["depth"], cfg, s["gaze_px"], sel, [], voices=voices)
-            ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            objs = {tid: {**o, **voices[tid]} for tid, o in s["objects"].items()}
-            focus = focus_counts.most_common(1)[0][0] if focus_counts else s["target"]
-            return {"jpeg": jpg.tobytes(), "objects": objs, "focus": focus, "selector": sel}
+    assistant = Assistant(cfg, music, context, player, pub.send, log=log, voice=voice)
+    if args.offline:
+        assistant.client.key = ""
 
-        def on_utterance(wav):
-            focus = next((k for k, _ in focus_counts.most_common() if k is not None), latest.get("target"))
-            telemetry.log("utterance", seconds=round(len(wav) / 32000, 2), focus=str(focus))
-            assistant.submit(wav, focus)
+    def apply_local(action):                      # swap / stop lesson: nothing for OMNI to decide
+        r = music.apply(action, latest.get("objects", {}), sel)
+        log(f"[menu] {action} -> {r}")
+        return r
 
-        assistant = Assistant(cfg, music, context, Player(), pub.send, log=lambda m: print(m, flush=True))
-        mic = Mic(on_utterance, vad="vad" in triggers, max_s=ocfg["max_utterance_s"])
-        print(f"[omni] {assistant.client.model} via {assistant.client.url}; talk with: {sorted(triggers)}", flush=True)
+    menu = Menu(cfg, (lambda key: None) if args.no_audio else voice.prompt, assistant.submit, apply_local)
+    print(f"[maestro] {'offline defaults' if not assistant.client.key else assistant.client.model + ' via ' + assistant.client.url}"
+          f"  [voice] {'ElevenLabs' if voice.eleven.ok else 'local'} fallback, {len(voice.clips)} prompt clips", flush=True)
 
     show = not args.headless
     view_mask = show_feat = paused = False
@@ -123,7 +133,7 @@ def main():
     fps_ema, last_wall = 0.0, time.monotonic()
     frame = t = idx = None
     locks = 0
-    talk_progress, talk_armed_ok, last_t = 0.0, True, None
+    key_gestures = []
 
     if show:
         cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
@@ -136,8 +146,6 @@ def main():
             scale = cfg["process_width"] / raw.shape[1]
             frame = raw if abs(scale - 1) < 1e-3 else cv2.resize(raw, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
         h, w = frame.shape[:2]
-        dt = 0.0 if last_t is None else max(0.0, t - last_t)
-        last_t = t
         if show and isinstance(gaze, MouseGaze):
             cv2.setMouseCallback(WIN, gaze.on_mouse, (w, h))
 
@@ -149,8 +157,13 @@ def main():
                 tracks = trk.update(dets, t, w)
             g = gaze.get(idx)
             gaze_px = (g[0] * w, g[1] * h) if g is not None else None
+            closed = gaze.eyes_closed(idx)
             with telemetry.span(tx, "select"):
-                events = sel.update(tracks, gaze_px, t, w)
+                if closed:                      # blinking: keep the target and freeze its dwell
+                    sel.hold(t)
+                    events = []
+                else:
+                    events = sel.update(tracks, gaze_px, t, w)
             depth = {tr.id: estimate_depth(tr, cfg, w) for tr in tracks}
             markers = marker.detect(frame) if marker else []
             proc_ms = (time.perf_counter() - t0) * 1000
@@ -159,32 +172,27 @@ def main():
                 tx.set_data("objects", len(tracks))
 
         objs = {tr.id: obj_json(tr, depth, w, h) for tr in tracks}
+        latest.update(frame=frame, tracks=tracks, depth=depth, gaze_px=gaze_px, objects=objs)
+
+        # ---- blink gestures drive the Maestro menu (the object under gaze is what "this one" means)
+        gestures = gaze.gestures(idx) + key_gestures
+        key_gestures = []
+        focus = sel.target_id if sel.target_id in objs else None
+        was_open = menu.active
+        for gs in gestures:
+            log(f"[blink] {gs['kind']} {gs.get('side', '')} on {focus}  menu={menu.state}")
+            telemetry.log("gesture", kind=gs["kind"], side=gs.get("side"), menu=str(menu.state))
+            pub.send({"type": "gesture", **gs, "focus": focus})
+            menu.on_gesture(gs, focus, music.lesson is not None, time.monotonic())
+        menu.tick(time.monotonic())
+        if was_open and not menu.active:
+            sel.locked = True                   # don't play the object you were answering on; look away first
         voices = {tid: music.voice_of(o["color"], o["shape"]) for tid, o in objs.items()}
-        latest.update(frame=frame, tracks=tracks, depth=depth, gaze_px=gaze_px, objects=objs, target=sel.target_id)
 
-        # ---- voice assistant triggers: dwell on the TALK card, or 'v'
-        talk = None
-        if assistant is not None:
-            mic.muted = assistant.status == "speaking"
-            if mic.capturing:
-                focus_counts[sel.target_id] += 1
-            elif assistant.status == "idle":
-                focus_counts.clear()
-            card = next((m for m in markers if m["id"] == ocfg["talk_marker_id"]), None)
-            if card is not None and "marker" in triggers:
-                if point_in(card["corners"], gaze_px):
-                    talk_progress = min(1.0, talk_progress + dt / max(cfg["selector"]["dwell_s"], 0.3))
-                    if talk_progress >= 1.0 and talk_armed_ok and assistant.status == "idle" and not mic.capturing:
-                        mic.arm()
-                        talk_armed_ok = False
-                else:
-                    talk_progress, talk_armed_ok = 0.0, True
-                talk = (card, talk_progress)
-
-        # ---- locks = notes. Muted while the user is talking so the note isn't recorded into the request.
+        # ---- locks = notes. None while a menu is open: the eyes are answering, not playing.
         out_events = []
         for e in events:
-            if mic is not None and mic.capturing:
+            if menu.active:
                 continue
             o = {**objs.get(e["id"], {}), **voices.get(e["id"], {})}
             e = {**e, "t": round(t, 4), "object": o}
@@ -194,6 +202,8 @@ def main():
             out_events.append(e)
             pub.send(e)
             locks += 1
+            recent.append({"note": o.get("note"), "instrument": o.get("instrument"), "best_guess": e["best_guess"],
+                           "lesson_correct": None if fb is None else fb["correct"], "at": time.monotonic()})
             flash_id, flash_until = e["id"], time.monotonic() + 0.25
             telemetry.log("lock", note=o.get("note"), instrument=o.get("instrument"), best_guess=e["best_guess"])
             print(f"[lock] #{e['id']} {o.get('color')} {o.get('shape')} -> {o.get('note')} {o.get('instrument')}"
@@ -205,23 +215,25 @@ def main():
         state = {
             "type": "state", "t": round(t, 4), "frame": idx,
             "gaze": None if g is None else [round(g[0], 4), round(g[1], 4)],
+            "eyes_closed": closed,
             "target": sel.target_id, "dwell": round(sel.progress, 3), "best_guess": sel.best_guess,
+            "dwell_s": sel.p["dwell_s"],
             "objects": [{**o, **voices[tid]} for tid, o in objs.items()],
             "lesson": mstate["lesson"],
-            "assistant": None if assistant is None else {"status": "listening" if mic.capturing else assistant.status,
-                                                         "caption": assistant.caption, **assistant.last_metrics},
+            "menu": None if not menu.active else {"state": menu.state, "focus": menu.focus, "options": menu.options()},
+            "assistant": {"status": assistant.status, "caption": assistant.caption, **assistant.last_metrics},
             "health": {
                 "fps": round(fps_ema, 1), "proc_ms": round(proc_ms, 1), "shape": backend,
                 "rejected": det.rejected,
                 "gaze_age_ms": gaze.age_ms() if hasattr(gaze, "age_ms") else None,
             },
         }
-        if args.calib_marker:
+        if marker:
             state["markers"] = [{k: m[k] for k in ("id", "x", "y")} for m in markers]
         pub.send(state)
         if rec:
-            rec.write(frame, {"t": state["t"], "gaze": state["gaze"], "target": sel.target_id,
-                              "dwell": state["dwell"], "events": out_events})
+            rec.write(frame, {"t": state["t"], "gaze": state["gaze"], "eyes_closed": closed, "gestures": gestures,
+                              "target": sel.target_id, "dwell": state["dwell"], "events": out_events})
 
         now = time.monotonic()
         fps_ema = 0.9 * fps_ema + 0.1 * (1.0 / max(now - last_wall, 1e-6))
@@ -230,21 +242,22 @@ def main():
         want_stream = stream is not None and stream.wants_frame()
         if show or want_snap or want_stream:
             hud = [f"{fps_ema:4.1f} fps  proc {proc_ms:4.1f} ms  shape:{backend}  gaze:{gaze.name}  "
-                   f"objs:{len(tracks)}  rejected:{det.rejected}  locks:{locks}",
-                   ("REC " if rec else "") + ("PAUSED " if paused else "") +
+                   f"objs:{len(tracks)}  rejected:{det.rejected}  locks:{locks}  dwell {sel.p['dwell_s']:.2f}s",
+                   ("REC " if rec else "") + ("PAUSED " if paused else "") + ("EYES CLOSED " if closed else "") +
                    (f"depth ref {cfg['depth']['ref_distance_cm']}cm" if cfg['depth']['ref_distance_cm'] else "depth: uncalibrated (c)")
                    + (f"   lesson: {mstate['lesson']['title']} {mstate['lesson']['index']}/{len(mstate['lesson']['notes'])}"
                       if mstate["lesson"] else "")]
             next_id = None
             if mstate["lesson"]:
                 next_id = next((tid for tid, v in voices.items() if v["note"] == mstate["lesson"]["next"]), None)
-            caption = None
-            if assistant is not None:
-                caption = ("listening" if mic.capturing else assistant.status,
-                           "Listening…" if mic.capturing else assistant.caption)
+            if menu.active:
+                opts = menu.options()
+                caption = ("menu", f"L: {opts['left']}   R: {opts['right']}   both: {opts['both']}   (double blink = cancel)")
+            else:
+                caption = (assistant.status, assistant.caption)
             img = overlay.draw(frame, tracks, depth, cfg, gaze_px, sel, hud,
                                flash_id if now < flash_until else None, markers, show_feat,
-                               voices=voices, next_id=next_id, talk=talk, caption=caption, t=now)
+                               voices=voices, next_id=next_id, menu_focus=menu.focus, caption=caption, t=now)
             if view_mask:
                 img = overlay.mask_view(det.label_map(frame), det.names, cfg)
             if want_stream:
@@ -260,8 +273,10 @@ def main():
             k = cv2.waitKey(wait) & 0xFF
             if k == ord("q"):
                 break
-            elif k == ord("v") and mic is not None:
-                mic.arm()
+            elif k in KEY_BLINKS:                  # stand-ins for blink gestures (testing without the eye tracker)
+                key_gestures.append({"kind": "long", "side": KEY_BLINKS[k], "t": round(t, 3), "source": "key"})
+            elif k == ord("x"):
+                key_gestures.append({"kind": "double", "t": round(t, 3), "source": "key"})
             elif k == ord("m"):
                 view_mask = not view_mask
             elif k == ord("f"):
