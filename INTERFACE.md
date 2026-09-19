@@ -56,13 +56,23 @@ the gaze tracker is down.
 **`lock`**, once per visit when dwell completes. **This is the "play a note" trigger**:
 
 ```json
-{"type": "lock", "t": 12.71, "id": 4, "best_guess": false, "object": { ...same as above... }}
+{"type": "lock", "t": 12.71, "id": 4, "best_guess": false,
+ "object": {"id": 4, "color": "green", "shape": "cylinder", "volume": 0.62, "note": "F4", "midi": 65, "instrument": "drum", ...},
+ "lesson": {"title": "Mary Had a Little Lamb", "correct": true, "expected": "E4", "index": 3, "total": 7, "done": false}}
 ```
+`note`/`midi`/`instrument` already include the user's voice overrides, so the game just plays them
+(`tools/synth.py` is a reference player). `lesson` is present only during a lesson.
+
+**`assistant`**, after each Maestro request: `{"type":"assistant","heard","say","actions","results","focus"}`
+(or `{"type":"assistant","error"}`). **`music`**: `{"type":"music","overrides":{...},"lesson":{...}}` after changes.
+
+`state` also carries `lesson` (with `next`: the note to look at) and
+`assistant: {status: idle|listening|thinking|speaking, caption, understand_ms, first_audio_ms}`.
 
 - `color` → pitch, `shape` → instrument (`round` | `square` | `cylinder`), `volume` → loudness
   (`null` until depth is calibrated; treat as 1.0).
-- Colours (8, rainbow order, suggested scale): `red` C4, `orange` D4, `yellow` E4, `green` F4, `cyan` G4,
-  `blue` A4, `purple` B4, `pink` C5. Names come from `config.json` → `colors`.
+- Default notes (rainbow order): `red` C4, `orange` D4, `yellow` E4, `green` F4, `cyan` G4, `blue` A4,
+  `purple` B4, `pink` C5; instruments: round marimba, square piano, cylinder flute (`config.json` → `music`).
 - To play the same object again the user must look away (> `grace_s`) and back.
 - `id` is stable while the object stays in view; it can change if the object leaves view for > 0.5 s.
 

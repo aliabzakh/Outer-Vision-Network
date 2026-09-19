@@ -23,7 +23,7 @@ Head-mounted, single-eye gaze tracker. Where you look on a table selects an obje
 | Mapping | colour → pitch, shape → instrument, farther back → quieter; note plays once per look |
 | Mode | Free play |
 | Framing | Assistive instrument for people who can't use their hands (ALS, paralysis): gaze is their only input, so it must not fail |
-| v3 outer vision | Colour-prototype LUT (8 colours) + ShapeCNN (ONNX via OpenCV) with rules fallback; picamera2 source; MJPEG camera/overlay streams; health in state. QNX removed |
+| v2 outer vision | Colour LUT (8 colours) + ShapeCNN (ONNX/OpenCV) with rules fallback; Pi camera over MJPEG; Maestro voice assistant on OMNI; lessons; synth; optional Sentry |
 | Rig | Cameras on glasses; Pi worn on the body; minimal markers (market as "works anywhere") |
 
 ## TODO / later
@@ -33,12 +33,18 @@ Head-mounted, single-eye gaze tracker. Where you look on a table selects an obje
 - [ ] Servo output (shelved in favour of music game)
 
 ## Hardware
-- Raspberry Pi 5 (Pi OS) at 192.168.2.2 on a direct Ethernet cable to the Mac; 2× Camera Module 3 + 2× older Pi cameras
-- Pi 5 has 2 CSI ports and **no 3.5 mm audio jack**
-- QNX dropped for feasibility (v3); RDK X5 dropped
+- Raspberry Pi 5 (Pi OS) + Camera Modules on glasses → MJPEG over Wi-Fi → laptop runs vision, Maestro, audio
+- QNX dropped (2026-09-19) for feasibility; RDK X5 dropped
 
-## Prize targets
-- Finalist (main award). Other tracks are being evaluated on the `OMNI-branch`.
+## Prize targets (re-checked 2026-09-19)
+| Track | Status |
+|---|---|
+| Finalist | primary: playful + assistive |
+| Huawei OMNI Live | **built**: Maestro (vision + speech + language, gaze-resolved "this"). Apply for credits at https://luma.com/0fhypcu0 (200 keys, first come); taking them requires submitting to this track |
+| Solana ($5k) + Badge Hack ($2.5k) | ideas in the chat thread; nothing built yet |
+| Sentry | hooks built (`SENTRY_DSN`): frame/stage traces, lock + utterance logs, profiling. Judged on how the data changed the project, so actually use it to find and fix something |
+| LeLamp / Bracket Bot | only if their hardware is free: a lamp that spotlights the object you're looking at (the original servo idea) |
+| OpenAI / Baseten / Backboard | not a fit unless we route a model call through them |
 
 ## Open questions
 

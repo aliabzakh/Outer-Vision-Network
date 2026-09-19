@@ -23,7 +23,11 @@ Everything we knowingly cut for the hackathon, and what "done properly" looks li
 | 17 | Edges | Objects cut off by the frame edge are flagged `partial` and get no depth | Track through the edge; wider lens |
 | 18 | Sync | Eye and world cameras are unsynchronised; gaze is paired with the newest frame (≤ 0.2 s old) | Hardware trigger or timestamp alignment |
 | 19 | Transport | UDP JSON with no delivery guarantee | A reliable channel for lock events (they're rare) |
-| 20 | Language | Python + OpenCV | Port hot paths only if the Pi can't keep up |
+| 20 | Language | Python + OpenCV | Fine for a laptop; port hot paths if it moves onto the wearable |
 | 21 | Markers | ArUco marker only for calibration, to stay "works anywhere" | None at all |
-| 22 | QNX | Dropped for feasibility (v3); standard Raspberry Pi OS instead | n/a |
-| 23 | Reliability | Health numbers are reported, but nothing restarts a stalled process | systemd service with restart + heartbeat |
+| 22 | QNX | Dropped for feasibility; standard Pi OS + laptop instead | n/a |
+| 23 | Voice latency | Maestro makes two calls (understand, then speak) so the voice matches the validated actions: ~1–3 s total | One streaming call with tool-calling, or the OMNI realtime API |
+| 24 | Talk trigger | `v` key or dwell on a printed TALK card; always-listening VAD is off by default because the venue is loud | Wake word / blink gesture from the eye camera |
+| 25 | Privacy | A frame + audio clip leave the device only when the user triggers Maestro; faces aren't blurred yet | On-device blur of faces/people before upload |
+| 26 | Assistant memory | Last 6 turns only, lost on restart | Per-user profile (preferred dwell, instruments, songs learned) |
+| 27 | Reliability | Health numbers are reported, but nothing restarts a stalled process | Supervisor process + heartbeat |
