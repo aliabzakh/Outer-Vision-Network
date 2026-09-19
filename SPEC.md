@@ -30,8 +30,18 @@ Head-mounted, single-eye gaze tracker. Where you look on a table selects an obje
 - [ ] Moving targets
 - [ ] Servo output (shelved in favour of music game)
 
+## Hardware (confirmed)
+- 1× QNX Raspberry Pi 5 Starter Kit, 1× Raspberry Pi 5 (4 GB), 1× RDK X5, 2× 16 GB microSD
+- 2× QNX Raspberry Pi Camera Module 3 (IMX708: **the only sensor with a QNX driver**, `qnx-sf-camera-imx708`)
+- 2× Raspberry Pi Camera Module (older: no QNX driver; use on the Pi OS Pi 5 / RDK X5)
+- Pi 5 has 2 CSI ports, so both CM3s go on the QNX Pi. Pi 5 has **no 3.5 mm audio jack**
+
+## Prize targets
+- QNX: must run on QNX OS **and** use an AI module from oss.qnx.com (tflite-runtime, ncnn, mediapipe, onnx,
+  pytorch, llama.cpp, whisper.cpp...). python3-opencv 4.12 + python3-numpy exist for QNX 8 aarch64
+- Finalist (main award)
+- RDK X5: not listed on the HTN prize page as of 2026-09-19; confirm with organizers
+
 ## Open questions
-- Pi model + exact cameras (screenshots didn't arrive): 1 vs 2 CSI ports, QNX camera driver support
-- Which board runs outer vision: QNX Pi or RDK X5?
 
 See COMPROMISES.md for every v0 shortcut.
