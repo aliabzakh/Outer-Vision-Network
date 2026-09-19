@@ -33,3 +33,12 @@ input { background: var(--bg); color: var(--text); border: 1px solid var(--line)
 .note.err { background: #ff63691a; color: var(--err); }
 .sales { list-style: none; padding: 0; margin: 0; font-size: 14px; display: grid; gap: 6px; }
 footer { margin-top: 40px; font-size: 12px; }
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.grow { flex: 1 1 180px; width: auto; min-width: 0; }
+.small { font-size: 12px; margin: 0; }
+.warn { color: var(--warn); }
+select { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; font-size: 14px; }
+.phone label { display: inline-flex; align-items: center; gap: 6px; }
+.phone input[type="checkbox"] { width: auto; }
+button.danger { background: var(--err); color: #fff; }
+.card.danger { border-color: #ff636955; }

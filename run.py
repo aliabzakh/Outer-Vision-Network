@@ -9,7 +9,7 @@ Examples:
   python run.py --source picam --gaze udp --headless --stream 8080                     # everything on the Pi
 
 Keys: q quit | 1/2/3 long blink left/right/both | x double blink | m colour view | f features | r record
-      c depth-calibrate | p pause | s snapshot
+      c depth-calibrate | p pause | s snapshot | w wallet menu for the last song
 Env (or .env): OMNI_API_KEY (Maestro's decisions + voice), ELEVENLABS_API_KEY (fallback voice), SENTRY_DSN (optional)
 """
 from __future__ import annotations
@@ -68,6 +68,12 @@ def main():
     ap.add_argument("--offline", action="store_true", help="never call OMNI; blink commands use the built-in defaults")
     ap.add_argument("--no-audio", action="store_true", help="no speaker: menu prompts and replies are shown, not spoken")
     ap.add_argument("--no-songs", action="store_true", help="don't save played phrases to songs/ (Solana marketplace)")
+    ap.add_argument("--wallet", action="store_true", help="eye wallet: the phone authorises the headset to mint/tip by blink")
+    ap.add_argument("--wallet-link", default="http,ble", help="phone link transports: http, ble or both")
+    ap.add_argument("--wallet-port", type=int, default=8765, help="HTTP port for the phone link")
+    ap.add_argument("--rig-id", default="outer-vision", help="name the phone sees and signs for")
+    ap.add_argument("--market", default="http://localhost:8787", help="marketplace server (mints songs)")
+    ap.add_argument("--rpc", default="https://api.devnet.solana.com", help="Solana RPC for the eye wallet")
     args = ap.parse_args()
 
     config.load_env()
@@ -125,7 +131,24 @@ def main():
         log(f"[menu] {action} -> {r}")
         return r
 
-    menu = Menu(cfg, (lambda key: None) if args.no_audio else voice.prompt, assistant.submit, apply_local)
+    wallet = bridge = None
+    if args.wallet:
+        from outer_vision.wallet import ble, http_link
+        from outer_vision.wallet.bridge import MenuBridge
+        from outer_vision.wallet.policy import Rpc, Wallet
+        wallet = Wallet("wallet", rpc=Rpc(args.rpc), market_url=args.market, rig_id=args.rig_id, log=log,
+                        explorer_cluster="devnet" if "devnet" in args.rpc else "mainnet-beta")
+        bridge = MenuBridge(wallet, log if args.no_audio else voice.say)
+        links = args.wallet_link.split(",")
+        # BLE forwards to the HTTP link, so it's always served (on localhost only if the phone uses BLE alone)
+        http_link.serve(wallet, args.wallet_port, host="0.0.0.0" if "http" in links else "127.0.0.1")
+        log(f"[wallet] phone link http://{'0.0.0.0' if 'http' in links else '127.0.0.1'}:{args.wallet_port}/wallet")
+        if "ble" in links:
+            ble.start(f"http://127.0.0.1:{args.wallet_port}", f"OV-{wallet.rig}", log=log)
+        log(f"[wallet] rig {wallet.rig}  headset key {wallet.address}  "
+            f"{'active for ' + wallet.delegation.owner if wallet.active() else 'not authorised yet'}")
+    say_prompt = (lambda key, text=None: None) if args.no_audio else voice.prompt
+    menu = Menu(cfg, say_prompt, assistant.submit, apply_local, wallet=bridge)
     print(f"[maestro] {'offline defaults' if not assistant.client.key else assistant.client.model + ' via ' + assistant.client.url}"
           f"  [voice] {'ElevenLabs' if voice.eleven.ok else 'local'} fallback, {len(voice.clips)} prompt clips", flush=True)
 
@@ -137,14 +160,18 @@ def main():
     frame = t = idx = None
     locks = 0
     key_gestures = []
+    last_song = None
 
     def song_done(song):
+        nonlocal last_song
         if song is None:
             return
+        last_song = song
         path = songs.save(song)
         pub.send({"type": "song", "song_id": song["song_id"], "fingerprint": song["fingerprint"],
                   "captured_at_ms": song["captured_at_ms"], "notes": len(song["notes"]), "path": str(path)})
         print(f"[song] {len(song['notes'])} notes, fingerprint {song['fingerprint'][:12]} -> {path}", flush=True)
+        menu.offer_song(song, time.monotonic())
 
     if show:
         cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
@@ -237,6 +264,8 @@ def main():
             "lesson": mstate["lesson"],
             "menu": None if not menu.active else {"state": menu.state, "focus": menu.focus, "options": menu.options()},
             "assistant": {"status": assistant.status, "caption": assistant.caption, **assistant.last_metrics},
+            "wallet": None if wallet is None else {"active": wallet.active(), "rig": wallet.rig,
+                                                   "remaining_today_lamports": wallet.status()["remaining_today_lamports"]},
             "health": {
                 "fps": round(fps_ema, 1), "proc_ms": round(proc_ms, 1), "shape": backend,
                 "rejected": det.rejected,
@@ -290,6 +319,9 @@ def main():
                 break
             elif k in KEY_BLINKS:                  # stand-ins for blink gestures (testing without the eye tracker)
                 key_gestures.append({"kind": "long", "side": KEY_BLINKS[k], "t": round(t, 3), "source": "key"})
+            elif k == ord("w"):
+                if last_song is None or not menu.offer_song(last_song, time.monotonic()):
+                    log("[wallet] no song to offer, or the wallet isn't authorised")
             elif k == ord("x"):
                 key_gestures.append({"kind": "double", "t": round(t, 3), "source": "key"})
             elif k == ord("m"):

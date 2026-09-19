@@ -2,3 +2,5 @@ numpy<2.1
 opencv-python<4.11   # >=4.7 needed for cv2.aruco.ArucoDetector; runs the ONNX shape net too
 sounddevice          # speaker: Maestro's voice and tools/synth.py (no microphone is used)
 sentry-sdk           # optional: tracing/logs when SENTRY_DSN is set
+pynacl               # eye wallet: ed25519 signing for the headset's session key (--wallet)
+bless                # optional: eye wallet phone link over Bluetooth LE (BlueZ on the Pi)

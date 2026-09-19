@@ -88,6 +88,11 @@ or `{"type":"gesture","kind":"double","focus":null}` (`focus` = object under gaz
 every note plus the table layout as bearings from the user's head (`azimuth_deg`, `elevation_deg`, `distance_cm`);
 see `outer_vision/song.py` for the fingerprint and `marketplace/` for what uses it.
 
+**Eye wallet** (`run.py --wallet`): after a song is saved the menu offers `song` → `tip_pick` → `confirm`
+(`menu.state`), and `state.wallet` = `{active, rig, remaining_today_lamports}` (null without `--wallet`). The phone
+talks to the headset over BLE (GATT service `7b3e0001-5f2a-4c1e-9d6a-0e7e5f0a11ce`) or HTTP `:8765/wallet`; see
+`outer_vision/wallet/link.py` for the ops.
+
 `state` also carries `eyes_closed`, `dwell_s`, `lesson` (with `next`: the note to look at),
 `menu: null | {state: object|space|space_lesson|swap_pick, focus, options: {left, right, both}}` and
 `assistant: {status: idle|thinking|speaking, caption, decide_ms, first_audio_ms, source}`.

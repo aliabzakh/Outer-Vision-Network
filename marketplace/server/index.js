@@ -8,6 +8,8 @@ import nacl from 'tweetnacl';
 import bs58 from 'bs58';
 import { LAMPORTS_PER_SOL, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import { claimMessage, delistMessage, pairMessage } from './song.js';
+import { marketRevokeMessage } from './wallet-messages.js';
+import { claimSigner } from './delegated.js';
 import { Store } from './store.js';
 import { Chain } from './solana.js';
 import { layoutSvg } from './art.js';
@@ -117,6 +119,17 @@ app.post('/api/pair', wrap(async (req, res) => {
   res.json({ rig: store.reg.rig });
 }));
 
+// ---------------------------------------------------------------- eye wallet: the phone can revoke a headset key
+app.post('/api/delegation/revoke', wrap(async (req, res) => {
+  const owner = checkAddr(req.body.owner);
+  const session = checkAddr(req.body.session);
+  takeNonce(req.body.nonce);
+  checkSig(marketRevokeMessage(owner, session, req.body.nonce), req.body.signature, owner);
+  store.reg.revoked = { ...(store.reg.revoked || {}), [session]: { owner, at: Date.now() } };
+  store.save();
+  res.json({ revoked: session });
+}));
+
 // ---------------------------------------------------------------- claim = creator signs the fingerprint, we mint
 const minting = new Set();
 app.post('/api/claim', wrap(async (req, res) => {
@@ -125,14 +138,16 @@ app.post('/api/claim', wrap(async (req, res) => {
   const all = store.captured();
   const e = all[req.body.song_id];
   if (!e) throw fail(404, 'no such song on this rig');
-  checkSig(claimMessage(e.song), req.body.signature, wallet);
+  // signed by the owner directly (web page), or by the headset under the owner's delegation (blink)
+  const signer = claimSigner(req.body, wallet, e.song, store.reg.revoked);
   const check = store.mintable(e, all);
   if (!check.ok) throw fail(409, check.reason);
   if (minting.has(e.song.fingerprint)) throw fail(409, 'already minting');
   minting.add(e.song.fingerprint);
   try {
     const out = await chain.mintSong(e.song, wallet, `${PUBLIC_URL}/api/metadata/${e.song.song_id}.json`);
-    store.record(e.song, { creator: wallet, owner: wallet, claim_signature: req.body.signature, ...out });
+    store.record(e.song, { creator: wallet, owner: wallet, claim_signature: req.body.signature,
+      ...(signer !== wallet ? { signed_by_headset: signer } : {}), ...out });
     console.log(`[mint] ${e.song.song_id.slice(0, 10)} -> ${out.asset} for ${wallet}`);
     res.json({ ...store.reg.songs[e.song.song_id], asset_url: chain.explorer('address', out.asset) });
   } finally {

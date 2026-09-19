@@ -46,8 +46,14 @@ class Voice:
         if missing:
             self.log(f"[voice] no clips for {missing}; run tools/gen_audio.py (using live/local speech meanwhile)")
 
-    def prompt(self, key: str):
-        """Speak a menu prompt now, cutting off anything still playing. Never blocks."""
+    def prompt(self, key: str, text: str | None = None):
+        """Speak a menu prompt now, cutting off anything still playing. Never blocks.
+        `text` = a prompt with live details (wallet contacts, amounts): spoken instead of the clip."""
+        if text is not None:
+            if self.player is not None:
+                self.player.stop()
+            threading.Thread(target=self.say, args=(text,), daemon=True).start()
+            return
         clip = self.clips.get(key)
         if clip is not None and self.player is not None:
             self.player.stop()
