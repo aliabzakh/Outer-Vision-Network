@@ -3,7 +3,8 @@ import math
 import random
 import unittest
 
-import sys
+import threading
+import time
 from pathlib import Path
 
 import cv2
@@ -11,7 +12,7 @@ import numpy as np
 
 from outer_vision import config, shape_net, synthetic
 from outer_vision.detector import NONE, Detector, build_color_lut
-from outer_vision.io import PipeSource
+from outer_vision.io import CameraSource, MjpegServer
 from outer_vision.selector import Selector
 from outer_vision.tracker import Tracker, estimate_depth, reference_sizes
 
@@ -87,17 +88,27 @@ class TestDetector(unittest.TestCase):
         self.assertEqual(lut[178, 200], names.index("red"))                     # hue wraps around 180
 
 
-class TestPipeSource(unittest.TestCase):
-    def test_all_formats_decode(self):
-        for fmt in ("bgrx", "rgbx", "nv12"):
-            src = PipeSource(f"pipe:{sys.executable} tools/fake_bridge.py --format {fmt} --frames 5 --fps 100 --width 640")
+class TestNetworkCamera(unittest.TestCase):
+    def test_mjpeg_roundtrip(self):
+        """Pi -> Mac path: MjpegServer on one side, cv2.VideoCapture(URL) on the other."""
+        srv = MjpegServer(8765, quality=90, max_fps=100)
+        ref = synthetic.render(0)
+        stop = threading.Event()
+
+        def feed():
+            while not stop.is_set():
+                srv.publish(ref)
+                time.sleep(0.02)
+
+        threading.Thread(target=feed, daemon=True).start()
+        try:
+            src = CameraSource("http://127.0.0.1:8765/stream")
             frame, _, _ = src.read()
-            src.close()
-            ref = synthetic.render(0)
             self.assertEqual(frame.shape, ref.shape)
-            # NV12 subsamples chroma, so allow some error; channel order must be right (red stays red)
-            err = np.abs(frame.astype(int) - ref.astype(int)).mean()
-            self.assertLess(err, 6 if fmt == "nv12" else 1, fmt)
+            self.assertLess(np.abs(frame.astype(int) - ref.astype(int)).mean(), 3)   # JPEG loss only
+        finally:
+            stop.set()
+            srv.httpd.shutdown()
 
 
 def track_at(tid, x, y, r=20):

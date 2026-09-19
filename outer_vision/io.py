@@ -2,11 +2,7 @@
 from __future__ import annotations
 
 import json
-import shlex
 import socket
-import struct
-import subprocess
-import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,11 +16,13 @@ from . import synthetic
 
 # ---------------------------------------------------------------- frame sources
 class CameraSource:
-    """Live camera: int index, or any string cv2.VideoCapture accepts (GStreamer pipeline, RTSP/TCP URL)."""
+    """Live camera: int index, or any URL/string cv2.VideoCapture accepts, e.g. the Pi's MJPEG stream
+    http://<pi>.local:8081/stream from tools/pi_camera_server.py."""
     live = True
 
     def __init__(self, spec, width=640, height=480, fps=30):
         self.cap = cv2.VideoCapture(int(spec) if str(spec).isdigit() else spec)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)   # newest frame, not a queue of stale ones
         if not self.cap.isOpened():
             raise RuntimeError(f"could not open camera {spec!r} (macOS: allow camera access for your terminal in System Settings > Privacy & Security > Camera; try index 1 for an iPhone/USB camera)")
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
@@ -70,92 +68,34 @@ class SyntheticSource:
         return synthetic.render(self.idx), self.idx / self.fps, self.idx
 
 
-class PipeSource:
-    """Frames from qnx/camera_bridge (or anything speaking its OVF1 format) on a pipe.
-
-    spec "pipe:-" reads stdin; "pipe:<command>" launches the command. A reader thread keeps only the
-    NEWEST frame, so a slow consumer drops frames instead of falling behind (latency stays bounded).
-    """
+class PicamSource:
+    """Raspberry Pi camera via picamera2 (Pi OS). spec: "picam" or "picam:<index>"."""
     live = True
-    HDR = struct.Struct("<4sIIIQ")
 
-    def __init__(self, spec: str):
-        cmd = spec.split(":", 1)[1]
-        if cmd == "-":
-            self.proc, self.stream = None, sys.stdin.buffer
-        else:
-            self.proc = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, bufsize=0)
-            self.stream = self.proc.stdout
-        self.fps = 30.0
-        self.idx = -1
-        self._latest = None           # (bgr, arrival_monotonic)
-        self._cond = threading.Condition()
-        self._eof = False
-        self.dropped = 0
-        threading.Thread(target=self._reader, daemon=True).start()
-
-    def _read_exact(self, n):
-        buf = bytearray()
-        while len(buf) < n:
-            chunk = self.stream.read(n - len(buf))
-            if not chunk:
-                return None
-            buf += chunk
-        return bytes(buf)
-
-    def _reader(self):
-        while True:
-            hdr = self._read_exact(self.HDR.size)
-            if hdr is None:
-                break
-            magic, w, h, fmt, _ts = self.HDR.unpack(hdr)
-            if magic != b"OVF1":
-                print("[pipe] bad frame header; stream out of sync", file=sys.stderr)
-                break
-            n = w * h * 4 if fmt in (1, 2) else w * h * 3 // 2
-            data = self._read_exact(n)
-            if data is None:
-                break
-            arr = np.frombuffer(data, np.uint8)
-            if fmt == 1:
-                bgr = cv2.cvtColor(arr.reshape(h, w, 4), cv2.COLOR_RGBA2BGR)
-            elif fmt == 2:
-                bgr = cv2.cvtColor(arr.reshape(h, w, 4), cv2.COLOR_BGRA2BGR)
-            else:
-                bgr = cv2.cvtColor(arr.reshape(h * 3 // 2, w), cv2.COLOR_YUV2BGR_NV12)
-            with self._cond:
-                if self._latest is not None:
-                    self.dropped += 1
-                self._latest = (bgr, time.monotonic())
-                self._cond.notify()
-        with self._cond:
-            self._eof = True
-            self._cond.notify()
+    def __init__(self, spec: str, width=1280, height=720, fps=30):
+        from picamera2 import Picamera2   # only exists on the Pi
+        idx = int(spec.split(":", 1)[1]) if ":" in spec else 0
+        self.cam = Picamera2(idx)
+        cfg = self.cam.create_video_configuration(main={"size": (width, height), "format": "RGB888"},
+                                                  controls={"FrameRate": fps})
+        self.cam.configure(cfg)
+        self.cam.start()
+        self.fps, self.idx = fps, -1
 
     def read(self):
-        with self._cond:
-            while self._latest is None and not self._eof:
-                self._cond.wait(timeout=1.0)
-            if self._latest is None:
-                return None, time.monotonic(), self.idx
-            frame, arrived = self._latest
-            self._latest = None
+        frame = self.cam.capture_array()   # "RGB888" in picamera2 is BGR byte order, i.e. OpenCV-ready
         self.idx += 1
-        self.frame_age_ms = (time.monotonic() - arrived) * 1000
         return frame, time.monotonic(), self.idx
 
     def close(self):
-        if self.proc is not None:
-            self.proc.terminate()
-            self.proc.wait(timeout=2)
-            self.proc.stdout.close()
+        self.cam.stop()
 
 
 def open_source(spec: str):
     if spec == "synthetic":
         return SyntheticSource()
-    if spec.startswith("pipe:"):
-        return PipeSource(spec)
+    if spec.startswith("picam"):
+        return PicamSource(spec)
     if Path(spec).is_file():
         return VideoSource(spec)
     return CameraSource(spec)

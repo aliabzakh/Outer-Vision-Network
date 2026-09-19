@@ -6,7 +6,8 @@ Examples:
   python run.py --source 0 --gaze mouse                       # webcam, mouse = gaze
   python run.py --source 0 --gaze udp --record                # real gaze from the inner-camera process
   python run.py --source recordings/X/world.mp4 --gaze replay:recordings/X/log.jsonl
-  python run.py --source "pipe:camera_bridge -u 1" --gaze udp --headless --stream 8080   # on the QNX Pi
+  python run.py --source http://192.168.2.2:8081/stream --gaze udp --stream 8080      # Pi camera -> laptop
+  python run.py --source picam --gaze udp --headless --stream 8080                     # everything on the Pi
 
 Keys: q quit | m mask view | f shape features | r record on/off | c depth-calibrate | p pause | s snapshot
 """
@@ -42,7 +43,7 @@ def obj_json(t, depth, w, h):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--source", default="0", help="camera index | video file | 'synthetic' | GStreamer/URL string")
+    ap.add_argument("--source", default="0", help="camera index | video file | 'synthetic' | 'picam[:N]' | MJPEG URL")
     ap.add_argument("--gaze", default="mouse", help="mouse | udp | synthetic | replay:<log.jsonl> | none")
     ap.add_argument("--config", default="config.json")
     ap.add_argument("--send", default=None, help="host:port for events (default from config)")
@@ -116,8 +117,6 @@ def main():
                 "fps": round(fps_ema, 1), "proc_ms": round(proc_ms, 1), "shape": backend,
                 "rejected": det.rejected,
                 "gaze_age_ms": gaze.age_ms() if hasattr(gaze, "age_ms") else None,
-                "frame_age_ms": round(getattr(src, "frame_age_ms", 0.0), 1),
-                "dropped_frames": getattr(src, "dropped", 0),
             },
         }
         if marker:

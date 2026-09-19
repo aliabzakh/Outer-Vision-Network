@@ -50,8 +50,7 @@ Suggested procedure (one marker, no clicks): the user stares at the marker while
               "bbox": [0.74, 0.55, 0.08, 0.22], "distance_cm": 71.3, "volume": 0.62, "partial": false}]}
 ```
 
-`state.health` = `{fps, proc_ms, shape: "ncnn"|"opencv-dnn"|"rules", rejected, gaze_age_ms,
-frame_age_ms, dropped_frames}`. Use it for a "system OK" indicator; if `gaze_age_ms` is null or large,
+`state.health` = `{fps, proc_ms, shape: "onnx"|"rules", rejected, gaze_age_ms}`. Use it for a "system OK" indicator; if `gaze_age_ms` is null or large,
 the gaze tracker is down.
 
 **`lock`**, once per visit when dwell completes. **This is the "play a note" trigger**:

@@ -3,7 +3,7 @@
 1. Every pixel's (hue, saturation) is mapped through a lookup table to the nearest registered colour
    prototype (or to nothing: the grey table, shadows, glare). One gather, ~1-2 ms at 640x480.
 2. Per colour: clean the mask, take outer contours = candidate objects.
-3. Each candidate's crop goes through the shape net (ncnn), which says round/square/cylinder, or
+3. Each candidate's crop goes through the shape net (ONNX), which says round/square/cylinder, or
    "reject" for hands, scraps, pens. Without a model, contour-geometry rules decide the shape.
 """
 from __future__ import annotations

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Train the shape classifier and export it for ncnn (QNX) + ONNX (OpenCV fallback).
+"""Train the shape classifier and export it to ONNX (run by OpenCV DNN at runtime).
 
-Runs on the Mac in the training env (torch is NOT needed on the Pi):
-  uv venv --python 3.12 .venv-train && uv pip install --python .venv-train/bin/python torch onnx ncnn pnnx "opencv-python<4.13" "numpy<2.3"
+Runs on the Mac in the training env (torch is NOT needed at runtime):
+  uv venv --python 3.12 .venv-train && uv pip install --python .venv-train/bin/python -r requirements-train.txt
   .venv-train/bin/python tools/train_shape.py                      # synthetic only (bootstrap)
   .venv-train/bin/python tools/train_shape.py --real data/real     # + crops from tools/collect.py
 
@@ -11,9 +11,7 @@ Real crops live in data/real/<round|square|cylinder|reject>/*.png and are weight
 import argparse
 import json
 import random
-import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -172,40 +170,17 @@ def export(model, out: Path, meta, check_bgr):
     ex = torch.rand(1, 3, SIZE, SIZE) * 255
     torch.onnx.export(model, ex, str(out / "shape.onnx"), input_names=["in0"], output_names=["out0"],
                       dynamic_axes={"in0": {0: "n"}, "out0": {0: "n"}}, opset_version=13, dynamo=False)
-    with tempfile.TemporaryDirectory() as td:
-        pt = Path(td) / "shape.pt"
-        torch.jit.trace(model, ex).save(str(pt))
-        pnnx_bin = Path(sys.executable).parent / "pnnx"
-        subprocess.run([str(pnnx_bin), str(pt), f"inputshape=[1,3,{SIZE},{SIZE}]"], cwd=td, check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        for ext in ("ncnn.param", "ncnn.bin"):
-            (out / f"shape.{ext}").write_bytes((Path(td) / f"shape.{ext}").read_bytes())
     (out / "labels.json").write_text(json.dumps(meta, indent=2) + "\n")
 
-    # The exported models must agree with torch, or the Pi will silently misbehave.
-    import ncnn
+    # The exported model must agree with torch, or the runtime silently misbehaves.
     ref = model(to_tensor(check_bgr)).detach().numpy()
-    net = ncnn.Net()
-    net.load_param(str(out / "shape.ncnn.param"))
-    net.load_model(str(out / "shape.ncnn.bin"))
-    got = []
-    for im in check_bgr:
-        e = net.create_extractor()
-        e.input("in0", ncnn.Mat.from_pixels(np.ascontiguousarray(im), ncnn.Mat.PixelType.PIXEL_BGR2RGB, SIZE, SIZE))
-        got.append(np.array(e.extract("out0")[1]).reshape(-1))
     cvnet = cv2.dnn.readNetFromONNX(str(out / "shape.onnx"))
     cvnet.setInput(cv2.dnn.blobFromImages(list(check_bgr), 1.0, (SIZE, SIZE), swapRB=True))
-    def softmax(z):
-        e = np.exp(z - z.max(1, keepdims=True))
-        return e / e.sum(1, keepdims=True)
-
-    got, cv_out = np.stack(got), cvnet.forward()
-    # ncnn runs fp16 on ARM by default, so compare probabilities/decisions, not raw logits.
-    d_ncnn = float(np.abs(softmax(got) - softmax(ref)).max())
-    d_cv = float(np.abs(softmax(cv_out) - softmax(ref)).max())
+    got = cvnet.forward()
+    d = float(np.abs(got - ref).max())
     agree = float((got.argmax(1) == ref.argmax(1)).mean())
-    print(f"exported to {out}: ncnn max|dprob| {d_ncnn:.1e} (argmax agree {agree:.0%}), opencv max|dprob| {d_cv:.1e}")
-    assert agree == 1.0 and d_ncnn < 2e-2 and d_cv < 1e-3, "exported model disagrees with torch"
+    print(f"exported to {out}: onnx/opencv max|diff| {d:.1e}, argmax agree {agree:.0%}")
+    assert agree == 1.0 and d < 1e-3, "exported model disagrees with torch"
     print(json.dumps(meta))
 
 

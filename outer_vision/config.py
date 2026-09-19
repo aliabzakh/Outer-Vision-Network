@@ -32,8 +32,6 @@ DEFAULTS = {
     "shape_net": {
         "enabled": True,
         "model_dir": "models/shape",
-        "backend": "ncnn",          # "ncnn" (QNX AI module) or "opencv" (ONNX via cv2.dnn)
-        "threads": 2,
         "reject_min_prob": 0.6,     # drop a candidate (hand, scrap, pen) above this "reject" probability
     },
     "detector": {
