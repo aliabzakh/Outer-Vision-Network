@@ -1,4 +1,4 @@
-"""What each object plays, runtime overrides (set by voice), and guided lessons.
+"""What each object plays, runtime overrides (set from the blink menu), and guided lessons.
 
 Mapping is keyed by "color/shape" (stable across tracker ID changes). Every change goes through
 apply(), which validates it, so a bad model reply can never put the instrument in a broken state.
@@ -55,7 +55,7 @@ class Music:
         """objects: output-JSON dicts from run.py; returns them annotated with note/instrument."""
         return [{**o, **self.voice_of(o["color"], o["shape"])} for o in objects]
 
-    # ------------------------------------------------------------------ actions (from the voice assistant)
+    # ------------------------------------------------------------------ actions (from Maestro / the blink menu)
     def apply(self, action: dict, objects: dict, selector=None) -> str:
         """Apply one validated action. objects: id -> object dict. Returns a short log line."""
         kind = action.get("type")

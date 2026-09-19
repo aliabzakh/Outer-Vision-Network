@@ -1,70 +1,95 @@
 # Outer Vision
 
 **An instrument you play with your eyes.** Look at a coloured object on the table and it plays a note:
-**colour → pitch, shape → instrument, farther → quieter**. Talk to **Maestro**, the voice assistant on
-Huawei's OMNI model, to reconfigure it hands-free: *"make this one a drum"*, *"teach me Mary Had a Little
-Lamb"*, *"what can I play?"* Built for people who can't use their hands; fun for anyone.
+**colour → pitch, shape → instrument, farther → quieter**. Reconfigure it with **blinks**: a long blink
+opens a spoken menu from **Maestro** (Huawei's OMNI model), and a long wink of the left eye, the right eye,
+or both picks an option. OMNI looks at the table and decides the details (which instrument, which note,
+which song, how much faster). No hands, no voice: built for people with ALS or paralysis, fun for anyone.
 
-This repo is the **world-camera ("outer") half**: objects, gaze target, notes, and the voice assistant.
-Gaze comes from the inner (eye) camera over UDP.
+This repo is the **world-camera ("outer") half**: objects, gaze target, notes, blink menu, Maestro.
+Gaze and eye state come from the inner (eye) camera over UDP.
 
-- Interfaces (gaze in, events out): **[INTERFACE.md](INTERFACE.md)**
+- Interfaces (gaze + eye state in, events out): **[INTERFACE.md](INTERFACE.md)**
 - Shortcuts and their proper versions: **[COMPROMISES.md](COMPROMISES.md)** · Decisions, prizes: **[SPEC.md](SPEC.md)**
 
 ## How it works
 ```
-Pi camera ─MJPEG/Wi-Fi─► run.py (laptop)
-  1. colour   every pixel → nearest registered colour (lookup table, ~1 ms)            WHERE
-  2. shape    crop → small CNN (ONNX, OpenCV) → round/square/cylinder/reject(hands)    WHAT
+Camera Module 3 ─► picamera2 (Pi) ─► run.py   (or Pi ─MJPEG─► run.py on a laptop)
+  1. colour   every pixel → nearest registered colour (lookup table, ~1 ms)                 WHERE
+  2. shape    crop → CNN (ONNX, OpenCV) → round/square/cylinder/reject(hands)               WHAT
   3. track    stable IDs, shape vote, size → distance → volume
   4. select   gaze → nearest outline → 0.5 s dwell → LOCK = note (colour/shape → note/instrument)
-  5. Maestro  (v key, or look at the TALK card) mic → OMNI: audio + annotated frame + gaze focus
-              → validated actions (instrument, notes, lessons, dwell) → reply in OMNI's own voice
-  ─► UDP events → tools/synth.py (sound) / game     ─► MJPEG overlay (--stream)     ─► Sentry traces (optional)
+  5. blinks   eye state → long blink / left wink / right wink / double blink (closed eyes freeze dwell)
+  6. Maestro  blink menu → command → OMNI (camera frame + scene + recent notes) → one validated action
+              → spoken reply in OMNI's voice. Offline defaults if OMNI is unreachable.
+  ─► UDP events → tools/synth.py (ElevenLabs-generated instrument samples) / game   ─► MJPEG overlay (--stream)
 ```
-Why OMNI and not a chatbot: **"this one"** is resolved from where you're LOOKING while you speak. Speech
-alone can't say which object, vision alone can't hear the request, and a hands-free user can't point.
+
+### The blink menu
+| Look at… and long-blink (0.6–2 s) | Maestro says | Left eye | Right eye | Both eyes |
+|---|---|---|---|---|
+| an object | *"Left eye, new instrument. Right eye, new note. Both eyes, swap it."* | OMNI picks a new instrument | OMNI picks a new note | look at another object + blink → swap notes |
+| empty table | *"Left eye, slower. Right eye, faster. Both eyes, teach me a song."* | OMNI lengthens the look-to-play time | OMNI shortens it | OMNI picks a song from the notes on the table |
+
+A **double blink** cancels; the menu also closes after 8 s. Natural blinks (<0.4 s) are ignored. No
+notes play while a menu is open, and the object you answered on won't play until you look away and back.
+Winks need per-eye lid state from the eye tracker; with a one-eye tracker every long blink counts as "both".
+
+Why OMNI: the user can only give a coarse command ("new note for this one"), so the model has to fill
+in the rest from what it **sees** (the table, the object's look, the other notes) and what the player has
+been doing, then **say** what it did. Every reply is checked against the command: a "faster" command
+can only make the look-to-play time shorter, never change an instrument.
 
 ## Setup
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m unittest discover tests -v          # 21 tests, no hardware or API key needed
-export OMNI_API_KEY=...                                 # Huawei OMNI Live credits (yibuapi)
-.venv/bin/python tools/omni_check.py                    # verifies the key, model and voice
+.venv/bin/python -m unittest discover tests -v     # no hardware or API keys needed
+cat > .env <<'EOF'                                  # gitignored; env variables override it
+OMNI_API_KEY=...                                    # Huawei OMNI Live credits (yibuapi)
+ELEVENLABS_API_KEY=...
+EOF
+.venv/bin/python tools/gen_audio.py                # ElevenLabs: instrument samples + menu voice clips (once)
+.venv/bin/python tools/omni_check.py teach         # verifies the OMNI key, model, reply format and voice
 ```
 
 ## Run
 ```bash
 .venv/bin/python tools/synth.py &                                        # sound for the notes
 .venv/bin/python run.py --source synthetic --gaze synthetic --realtime   # no hardware
-.venv/bin/python run.py --source 0 --gaze mouse --omni                   # webcam, mouse = gaze, Maestro on
-.venv/bin/python run.py --source http://pi.local:8081/stream --gaze udp --omni --stream 8080
+.venv/bin/python run.py --source 0 --gaze mouse                          # webcam, mouse = gaze, keys = blinks
+.venv/bin/python run.py --source http://192.168.2.2:8081/stream --gaze udp --stream 8080
 ```
-On the Pi: `python3 tools/pi_camera_server.py --camera 0` serves the world camera.
-Keys: `v` talk · `q` quit · `m` colour view · `f` features · `r` record · `c` depth ref · `p` pause · `s` snapshot.
-**Hands-free talk:** print `tools/make_marker.py --id 7` (the TALK card), put it at the table edge, and look at it.
+Keys: `1`/`2`/`3` long blink left/right/both · `x` double blink · `q` quit · `m` colour view · `f` features
+· `r` record · `c` depth ref · `p` pause · `s` snapshot.
+Flags: `--offline` (never call OMNI; built-in defaults), `--no-audio` (menu shown on the overlay only).
+Simulate the eye tracker: `tools/send_gaze.py --at 0.4 0.6 --blink both` (then `--blink left`, …).
 
-## Demo script (≈90 s, covers all three OMNI modalities)
+## Demo script (≈90 s)
 1. Look at red, yellow, blue → notes play (marimba, marimba, piano).
-2. Look at the TALK card: *"What can I play here?"* → Maestro describes the table from the camera view.
-3. Look at the green cylinder: *"Make this one a drum."* → the label changes, and it now plays a drum.
-4. *"Teach me Mary Had a Little Lamb."* → Maestro fits the song to the notes on the table; a "next" ring
-   guides your eyes, and a fanfare plays at the end.
-5. *"That's too fast for me."* → dwell time goes up; the instrument adapts to the player.
+2. Look at the green cylinder, long blink → Maestro reads the object menu. Wink left → OMNI replies with something like *"That tall
+   one sounds like strings now, to go with the piano."* It now plays strings.
+3. Look at the empty table, long blink, both eyes → OMNI picks a song from the notes on the table. A
+   "next" ring guides your eyes and a fanfare plays at the end.
+4. Long blink on the table, wink left → something like *"I'll give you a little more time on each note."* The instrument
+   adapts to the player.
 
 ## On a real table (≈20 min, redo when the lighting changes)
-1. **Colours:** `tools/tune_colors.py --source 0`. Press 1–8 for a slot, click that object. The right half
-   shows what each pixel is assigned to; the table must stay black. Press `s` to save.
-2. **Shape data:** put only ONE shape on the table and collect ~2 min each, moving your head
-   (angles, distances): `tools/collect.py --source 0 --label round` (then `square`, `cylinder`).
-   For `--label reject`, use an empty table and wave hands, pens and paper over it.
-3. **Train** (Mac, ~3 min): `.venv-train/bin/python tools/train_shape.py --real data/real`. It exports
-   `models/shape/*` and checks that the ONNX copy agrees with torch before writing.
-4. **Depth:** all objects at one known distance → `run.py --ref-distance 60`, press `c`.
-5. **Record sessions** (`r`) and replay them to tune without wearing the rig:
+1. **Colours:** `tools/tune_colors.py --source 0`: press 1–8, click the object, `s` to save.
+2. **Shape data**, either way (or both):
+   - *OMNI labels (recommended):* the real mixed table, plus hands and pens waved over it, ~3 min of
+     moving your head: `tools/collect.py --source 0 --label auto`, then `tools/omni_label.py`. OMNI labels
+     4×4 sheets of crops twice, shuffled, and keeps only the crops both passes agree on. The rest go to
+     `data/review/` for a human look.
+   - *Session labels:* one shape on the table at a time: `tools/collect.py --source 0 --label round`
+     (then `square`, `cylinder`, `reject`).
+3. **Train** (Mac): `.venv-train/bin/python tools/train_shape.py --real data/real`. The default is an
+   ImageNet-pretrained MobileNetV3-small (96 px); `--arch tiny` is the small 64 px CNN. Train both into
+   separate `--out` folders and point `config.json` → `shape_net.model_dir` at the one with the higher
+   `real_val_acc` (it holds out whole object tracks, so near-duplicate crops can't inflate it). Training env: `uv venv --python 3.12 .venv-train && uv pip install --python .venv-train/bin/python -r requirements-train.txt`.
+   The ONNX copy is checked against torch before it's written.
+4. **Depth:** all objects at one known distance, `run.py --ref-distance 60`, press `c`.
+5. **Record sessions** (`r`), including blinks, and replay them to tune without wearing the rig:
    `run.py --source recordings/<ts>/world.mp4 --gaze replay:recordings/<ts>/log.jsonl`
-
-The shipped shape model is trained on synthetic renders only, so steps 2–3 matter for real objects.
 
 ## Raspberry Pi
 The Pi is at **192.168.2.2** on a direct Ethernet cable. The Mac needs an address on that cable too
@@ -81,6 +106,7 @@ ssh <user>@192.168.2.2 'cd outer-vision && .venv/bin/python run.py --source pica
 ssh <user>@192.168.2.2 'cd outer-vision && .venv/bin/python tools/pi_camera_server.py --camera 0'
 .venv/bin/python run.py --source http://192.168.2.2:8081/stream --gaze mouse     # on the laptop
 ```
+The Pi 5 has no audio jack: Maestro's voice and the notes play on the laptop (or a USB speaker).
 
 ## Objects
 Matte, single saturated colour, 6–10 cm, ≥10 cm apart, on a grey table. Colour slots (rainbow = scale):
@@ -96,11 +122,18 @@ red C4, orange D4, yellow E4, green F4, cyan G4, blue A4, purple B4, pink C5.
 outer_vision/detector.py   colour LUT → contours → shape (net or rules)
 outer_vision/shape_net.py  ONNX shape CNN via OpenCV DNN
 outer_vision/tracker.py    IDs, shape voting, size → distance → volume
-outer_vision/selector.py   gaze → target → dwell → one lock per look
-outer_vision/music.py      colour/shape → note/instrument, voice overrides, lessons (validated actions)
-outer_vision/omni.py       Maestro: OMNI client (streaming text+audio), understand → act → speak
-outer_vision/audio.py      mic endpointing, streaming speech player
+outer_vision/selector.py   gaze → target → dwell → one lock per look (held while the eyes are closed)
+outer_vision/blink.py      eye state → long blink / wink / double blink
+outer_vision/menu.py       the blink menu (prompts, options, swap, cancel, timeout)
+outer_vision/music.py      colour/shape → note/instrument, overrides, lessons, offline defaults
+outer_vision/omni.py       Maestro: OMNI client (streaming text+audio), decide → check → act → speak
+outer_vision/voice.py      menu prompt clips, fallback speech (ElevenLabs, then local TTS)
+outer_vision/eleven.py     ElevenLabs client (text to speech, sound effects), PCM 24 kHz
+outer_vision/audio.py      streaming speech player (output only: there is no microphone)
+outer_vision/pitch.py      trim / pitch estimate / repitch for generated samples
 outer_vision/telemetry.py  optional Sentry traces/logs
-outer_vision/io.py         sources (webcam, video, synthetic, picam, MJPEG URL), gaze in, UDP out, MJPEG, recorder, ArUco
-tools/                     synth, omni_check, pi_camera_server, tune_colors, collect, train_shape, listen, send_gaze, make_marker
+outer_vision/io.py         sources (webcam, video, synthetic, picam, MJPEG URL), gaze + blinks in, UDP out, MJPEG, recorder, ArUco
+deploy/                    Pi setup: deploy_pi.sh (Mac → Pi), setup_pi.sh (on the Pi)
+tools/                     synth, gen_audio, omni_check, omni_label, collect, train_shape, tune_colors,
+                           pi_camera_server, listen, send_gaze, make_marker
 ```

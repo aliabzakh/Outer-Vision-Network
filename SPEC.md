@@ -13,7 +13,8 @@ Head-mounted, single-eye gaze tracker. Where you look on a table selects an obje
 | Shapes / colours | round, cylinder, square / red, yellow, green, blue (black/white dropped: shadows, glare) |
 | Detection | Classical CV (colour threshold + contour shape), no VLM in the hot path |
 | Selection | Continuous gaze stream; "lock" after 0.5 s dwell (tunable); low confidence → best guess |
-| Calibration | Per user, short startup calibration OK; no input during use |
+| Calibration | Per user, short startup calibration OK; no hand or voice input during use |
+| Commands | Blinks only (2026-09-19): long blink opens a spoken menu, left / right / both-eye winks pick, double blink cancels. No microphone |
 | Latency | 100–200 ms target |
 | Output | Location only (no naming). Live debug overlay. Record sessions (compressed) |
 | Language | Python |
@@ -23,7 +24,8 @@ Head-mounted, single-eye gaze tracker. Where you look on a table selects an obje
 | Mapping | colour → pitch, shape → instrument, farther back → quieter; note plays once per look |
 | Mode | Free play |
 | Framing | Assistive instrument for people who can't use their hands (ALS, paralysis): gaze is their only input, so it must not fail |
-| v2 outer vision | Colour LUT (8 colours) + ShapeCNN (ONNX/OpenCV) with rules fallback; Pi camera over MJPEG; Maestro voice assistant on OMNI; lessons; synth; optional Sentry |
+| v3 outer vision | Colour LUT (8 colours) + ShapeCNN (ONNX/OpenCV) with rules fallback; picamera2 source; MJPEG camera/overlay streams; health in state. QNX removed |
+| v4 (OMNI merged) | Blink menu → Maestro on OMNI (decides details from the camera view, checked against the command, offline defaults); ElevenLabs instrument samples + menu voice; lessons; optional Sentry. Shape labels from OMNI offline, pretrained MobileNetV3-small |
 | Rig | Cameras on glasses; Pi worn on the body; minimal markers (market as "works anywhere") |
 
 ## TODO / later
@@ -33,16 +35,19 @@ Head-mounted, single-eye gaze tracker. Where you look on a table selects an obje
 - [ ] Servo output (shelved in favour of music game)
 
 ## Hardware
-- Raspberry Pi 5 (Pi OS) + Camera Modules on glasses → MJPEG over Wi-Fi → laptop runs vision, Maestro, audio
+- Raspberry Pi 5 (Pi OS) at 192.168.2.2 on a direct Ethernet cable to the Mac; 2× Camera Module 3 + 2× older Pi cameras
+- Pi 5 has 2 CSI ports and **no 3.5 mm audio jack**, so sound plays on the laptop (or a USB speaker)
+- Winks need both eyes' lid state: one eye camera can only report "both"
 - QNX dropped (2026-09-19) for feasibility; RDK X5 dropped
 
 ## Prize targets (re-checked 2026-09-19)
 | Track | Status |
 |---|---|
 | Finalist | primary: playful + assistive |
-| Huawei OMNI Live | **built**: Maestro (vision + speech + language, gaze-resolved "this"). Apply for credits at https://luma.com/0fhypcu0 (200 keys, first come); taking them requires submitting to this track |
-| Solana ($5k) + Badge Hack ($2.5k) | ideas in the chat thread; nothing built yet |
-| Sentry | hooks built (`SENTRY_DSN`): frame/stage traces, lock + utterance logs, profiling. Judged on how the data changed the project, so actually use it to find and fix something |
+| Huawei OMNI Live | **built**, key in hand: Maestro decides instrument / note / dwell / song from the camera view + gaze focus + play history and speaks in OMNI's voice; OMNI also labels real shape crops offline |
+| ElevenLabs | **built**: instrument samples (sound effects API) repitched per note, menu voice prompts (TTS), live TTS fallback |
+| Solana ($5k) + Badge Hack ($2.5k) | on hold until the core demo is solid (eye-signing, MINT card QR, audience memos) |
+| Sentry | hooks built (`SENTRY_DSN`): frame/stage traces, lock + gesture logs, profiling. Judged on how the data changed the project, so actually use it to find and fix something |
 | LeLamp / Bracket Bot | only if their hardware is free: a lamp that spotlights the object you're looking at (the original servo idea) |
 | OpenAI / Baseten / Backboard | not a fit unless we route a model call through them |
 

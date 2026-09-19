@@ -1,8 +1,8 @@
 # Interfaces between the three pieces
 
 ```
-inner camera (eye)  ──gaze UDP :5005──►  outer vision (run.py)  ──events UDP :5006──►  game / audio
-                    ◄── "markers" in state stream (for calibration) ──┘
+inner camera (eye)  ──gaze + lids UDP :5005──►  outer vision (run.py)  ──events UDP :5006──►  game / audio
+                            ◄── "markers" in state stream (for calibration) ──┘
 ```
 
 All coordinates are **normalized world-camera image coordinates**: `x, y ∈ [0, 1]`, origin **top-left**,
@@ -13,17 +13,29 @@ measured on the *outer* camera's full frame (any resolution / crop must be undon
 One JSON object per datagram, as often as you have samples (30–120 Hz):
 
 ```json
-{"x": 0.512, "y": 0.430, "valid": true, "conf": 0.9, "t": 1726722000.123}
+{"x": 0.512, "y": 0.430, "valid": true, "left_closed": false, "right_closed": false, "conf": 0.9, "t": 1726722000.123}
 ```
 
 | field | meaning |
 |---|---|
 | `x`, `y` | where the user looks, already mapped into the **world** camera image |
-| `valid` | `false` during blinks / pupil lost → outer vision treats it as "no gaze" (dwell survives short gaps) |
+| `valid` | `false` whenever the gaze point is unusable (both eyes closed, pupil lost) → "no gaze" |
+| `left_closed`, `right_closed` | **per-eye lid state. This is the user's only way to give commands** (the blink menu), so send it on every sample, including while the eyes are closed |
 | `conf` | optional, 0–1, currently logged only |
 | `t` | optional, sender clock; ignored (receive time is used) |
 
-Samples older than `selector.gaze_max_age_s` (0.2 s) are dropped. Reference sender: `tools/send_gaze.py`.
+Samples older than `selector.gaze_max_age_s` (0.2 s) are dropped. Reference sender: `tools/send_gaze.py`
+(`--at X Y --blink left|right|both|double` sends a gesture).
+
+**Blinks.** Outer vision turns the lid state into gestures (`outer_vision/blink.py`, thresholds in
+`config.json` → `blink`): closed < 0.4 s = natural blink (ignored; two within 0.7 s = **double blink**),
+0.6–2 s = **long blink** with side `left` | `right` | `both` (the eye closed for ≥ 70 % of it), longer =
+ignored. While any eye is closed the dwell timer is frozen, so blinking never plays or loses a note.
+- If only one eye is tracked, send just that eye's field; every long blink then counts as `both`
+  (menus still work, but the left/right options can't be chosen, so two eyes are needed for the full menu).
+- If neither field is sent, `valid: false` is taken as both eyes closed. That also catches "pupil lost",
+  so a lost pupil for 0.6–2 s would open a menu: please send the lid state explicitly.
+- Keep sending samples during a blink: a gap > 0.25 s mid-closure discards the gesture.
 
 ## 2. Calibration pairing (outer vision provides)
 
@@ -60,14 +72,20 @@ the gaze tracker is down.
  "object": {"id": 4, "color": "green", "shape": "cylinder", "volume": 0.62, "note": "F4", "midi": 65, "instrument": "drum", ...},
  "lesson": {"title": "Mary Had a Little Lamb", "correct": true, "expected": "E4", "index": 3, "total": 7, "done": false}}
 ```
-`note`/`midi`/`instrument` already include the user's voice overrides, so the game just plays them
-(`tools/synth.py` is a reference player). `lesson` is present only during a lesson.
+`note`/`midi`/`instrument` already include the user's blink-menu changes, so the game just plays them
+(`tools/synth.py` is a reference player). `lesson` is present only during a lesson. No locks are sent
+while a blink menu is open.
 
-**`assistant`**, after each Maestro request: `{"type":"assistant","heard","say","actions","results","focus"}`
-(or `{"type":"assistant","error"}`). **`music`**: `{"type":"music","overrides":{...},"lesson":{...}}` after changes.
+**`gesture`**, per deliberate blink: `{"type":"gesture","kind":"long","side":"left","duration":0.9,"focus":4}`
+or `{"type":"gesture","kind":"double","focus":null}` (`focus` = object under gaze, `source:"key"` from the keyboard).
 
-`state` also carries `lesson` (with `next`: the note to look at) and
-`assistant: {status: idle|listening|thinking|speaking, caption, understand_ms, first_audio_ms}`.
+**`assistant`**, after each Maestro command:
+`{"type":"assistant","command":{"command":"change_instrument","target":4},"say","actions","results","source":"omni"|"fallback"}`
+(or `{"type":"assistant","command",...,"error"}`). **`music`**: `{"type":"music","overrides":{...},"lesson":{...},"dwell_s":0.6}` after changes.
+
+`state` also carries `eyes_closed`, `dwell_s`, `lesson` (with `next`: the note to look at),
+`menu: null | {state: object|space|space_lesson|swap_pick, focus, options: {left, right, both}}` and
+`assistant: {status: idle|thinking|speaking, caption, decide_ms, first_audio_ms, source}`.
 
 - `color` → pitch, `shape` → instrument (`round` | `square` | `cylinder`), `volume` → loudness
   (`null` until depth is calibrated; treat as 1.0).
