@@ -22,6 +22,8 @@ Head-mounted, single-eye gaze tracker. Where you look on a table selects an obje
 | Team | 4 people, 30 h. This repo = OUTER vision only; gaze tracking is a teammate's |
 | Mapping | colour → pitch, shape → instrument, farther back → quieter; note plays once per look |
 | Mode | Free play |
+| Framing | Assistive instrument for people who can't use their hands (ALS, paralysis): gaze is their only input, so it must not fail |
+| v1 outer vision | Colour-prototype LUT (8 colours) + ShapeCNN on ncnn (QNX AI module) with rules fallback; QNX camera bridge; MJPEG overlay to Mac; health in state |
 | Rig | Cameras on glasses; Pi worn on the body; minimal markers (market as "works anywhere") |
 
 ## TODO / later
@@ -40,7 +42,7 @@ Head-mounted, single-eye gaze tracker. Where you look on a table selects an obje
 - QNX: must run on QNX OS **and** use an AI module from oss.qnx.com (tflite-runtime, ncnn, mediapipe, onnx,
   pytorch, llama.cpp, whisper.cpp...). python3-opencv 4.12 + python3-numpy exist for QNX 8 aarch64
 - Finalist (main award)
-- RDK X5: not listed on the HTN prize page as of 2026-09-19; confirm with organizers
+- RDK X5: dropped (doesn't fit the use case)
 
 ## Open questions
 

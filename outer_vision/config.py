@@ -9,13 +9,32 @@ DEFAULTS = {
     # Frames are resized to this width before processing. Every *_frac value below is a
     # fraction of this width, so tuning survives resolution changes.
     "process_width": 640,
-    # OpenCV HSV: H 0-180, S/V 0-255. Each colour is a list of [h_lo,s_lo,v_lo,h_hi,s_hi,v_hi].
-    # The grey table has low saturation, so the S floor is what separates it from objects.
+    # Colour prototypes, OpenCV HSV (H 0-180, S/V 0-255): each pixel goes to the NEAREST prototype.
+    # Register real values per object with tools/tune_colors.py (click the object). Rainbow order =
+    # suggested scale C D E F G A B C'. "bgr" is only the debug-overlay colour.
     "colors": {
-        "red":    {"hsv": [[0, 120, 70, 8, 255, 255], [165, 120, 70, 180, 255, 255]], "bgr": [40, 40, 230]},
-        "yellow": {"hsv": [[20, 110, 90, 35, 255, 255]], "bgr": [40, 220, 240]},
-        "green":  {"hsv": [[40, 80, 50, 85, 255, 255]], "bgr": [60, 200, 60]},
-        "blue":   {"hsv": [[95, 110, 50, 130, 255, 255]], "bgr": [230, 120, 40]},
+        "red":    {"hsv": [0, 200, 170],   "bgr": [40, 40, 230]},
+        "orange": {"hsv": [12, 210, 220],  "bgr": [20, 120, 245]},
+        "yellow": {"hsv": [27, 200, 210],  "bgr": [40, 220, 240]},
+        "green":  {"hsv": [62, 170, 150],  "bgr": [60, 200, 60]},
+        "cyan":   {"hsv": [90, 180, 170],  "bgr": [220, 210, 40]},
+        "blue":   {"hsv": [110, 200, 170], "bgr": [230, 120, 40]},
+        "purple": {"hsv": [135, 150, 140], "bgr": [180, 60, 150]},
+        "pink":   {"hsv": [165, 140, 210], "bgr": [180, 120, 245]},
+    },
+    "color_match": {
+        "s_min": 90,        # below this saturation = table/glare/shadow, never an object
+        "v_min": 60,        # below this brightness = shadow/black
+        "hue_tol": 8,       # hue units that count as distance 1.0
+        "sat_tol": 90,      # saturation units that count as distance 1.0
+        "max_dist": 1.7,    # pixels farther than this from every prototype are ignored
+    },
+    "shape_net": {
+        "enabled": True,
+        "model_dir": "models/shape",
+        "backend": "ncnn",          # "ncnn" (QNX AI module) or "opencv" (ONNX via cv2.dnn)
+        "threads": 2,
+        "reject_min_prob": 0.6,     # drop a candidate (hand, scrap, pen) above this "reject" probability
     },
     "detector": {
         "blur": 5,                    # Gaussian kernel (odd) before HSV; 0 disables
@@ -73,7 +92,12 @@ def _merge(base: dict, over: dict) -> dict:
 def load(path: str | None) -> dict:
     if path and Path(path).exists():
         with open(path) as f:
-            return _merge(DEFAULTS, json.load(f))
+            user = json.load(f)
+        cols = user.get("colors", {})
+        if any(isinstance(c.get("hsv", [None])[0], list) for c in cols.values()):
+            print(f"[config] {path}: v0 colour ranges found; using v1 colour prototypes instead", flush=True)
+            user.pop("colors")
+        return _merge(DEFAULTS, user)
     return copy.deepcopy(DEFAULTS)
 
 

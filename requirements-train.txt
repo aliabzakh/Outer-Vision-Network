@@ -1,0 +1,7 @@
+# Mac only, Python 3.12: uv venv --python 3.12 .venv-train && uv pip install --python .venv-train/bin/python -r requirements-train.txt
+torch
+onnx
+ncnn
+pnnx
+numpy<2.3
+opencv-python<4.13

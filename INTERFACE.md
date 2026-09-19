@@ -50,6 +50,10 @@ Suggested procedure (one marker, no clicks): the user stares at the marker while
               "bbox": [0.74, 0.55, 0.08, 0.22], "distance_cm": 71.3, "volume": 0.62, "partial": false}]}
 ```
 
+`state.health` = `{fps, proc_ms, shape: "ncnn"|"opencv-dnn"|"rules", rejected, gaze_age_ms,
+frame_age_ms, dropped_frames}`. Use it for a "system OK" indicator; if `gaze_age_ms` is null or large,
+the gaze tracker is down.
+
 **`lock`**, once per visit when dwell completes. **This is the "play a note" trigger**:
 
 ```json
@@ -58,6 +62,8 @@ Suggested procedure (one marker, no clicks): the user stares at the marker while
 
 - `color` → pitch, `shape` → instrument (`round` | `square` | `cylinder`), `volume` → loudness
   (`null` until depth is calibrated; treat as 1.0).
+- Colours (8, rainbow order, suggested scale): `red` C4, `orange` D4, `yellow` E4, `green` F4, `cyan` G4,
+  `blue` A4, `purple` B4, `pink` C5. Names come from `config.json` → `colors`.
 - To play the same object again the user must look away (> `grace_s`) and back.
 - `id` is stable while the object stays in view; it can change if the object leaves view for > 0.5 s.
 

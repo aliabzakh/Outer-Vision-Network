@@ -1,2 +1,3 @@
 numpy<2.1
 opencv-python<4.11   # >=4.7 needed for cv2.aruco.ArucoDetector
+ncnn                 # shape net runtime (the QNX AI module); falls back to OpenCV DNN / rules if missing

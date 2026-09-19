@@ -6,6 +6,7 @@ Examples:
   python run.py --source 0 --gaze mouse                       # webcam, mouse = gaze
   python run.py --source 0 --gaze udp --record                # real gaze from the inner-camera process
   python run.py --source recordings/X/world.mp4 --gaze replay:recordings/X/log.jsonl
+  python run.py --source "pipe:camera_bridge -u 1" --gaze udp --headless --stream 8080   # on the QNX Pi
 
 Keys: q quit | m mask view | f shape features | r record on/off | c depth-calibrate | p pause | s snapshot
 """
@@ -17,9 +18,9 @@ from pathlib import Path
 
 import cv2
 
-from outer_vision import config, overlay
+from outer_vision import config, overlay, shape_net
 from outer_vision.detector import Detector
-from outer_vision.io import CalibMarker, MouseGaze, Publisher, Recorder, open_gaze, open_source
+from outer_vision.io import CalibMarker, MjpegServer, MouseGaze, Publisher, Recorder, open_gaze, open_source
 from outer_vision.selector import Selector
 from outer_vision.tracker import Tracker, estimate_depth, reference_sizes
 
@@ -52,12 +53,22 @@ def main():
     ap.add_argument("--calib-marker", action="store_true", help="detect ArUco markers for gaze calibration")
     ap.add_argument("--ref-distance", type=float, default=60.0, help="cm, used by the 'c' depth calibration")
     ap.add_argument("--realtime", action="store_true", help="pace file/synthetic sources to their fps")
+    ap.add_argument("--stream", type=int, default=0, help="serve the debug overlay as MJPEG on this port")
+    ap.add_argument("--no-net", action="store_true", help="ignore the shape net; contour rules only")
     args = ap.parse_args()
 
     cfg = config.load(args.config)
     src = open_source(args.source)
     gaze = open_gaze(args.gaze, cfg)
-    det, trk, sel = Detector(cfg), Tracker(cfg), Selector(cfg)
+    if args.no_net:
+        cfg["shape_net"]["enabled"] = False
+    net = shape_net.load(cfg)
+    det, trk, sel = Detector(cfg, net), Tracker(cfg), Selector(cfg)
+    backend = net.backend if net else "rules"
+    stream = MjpegServer(args.stream) if args.stream else None
+    if stream:
+        print(f"[stream] http://0.0.0.0:{args.stream}/", flush=True)
+    print(f"[shape] {backend}", flush=True)
     marker = CalibMarker(cfg["calib_marker"]["dictionary"]) if args.calib_marker else None
     host, port = (args.send.split(":") if args.send else (cfg["events"]["host"], cfg["events"]["port"]))
     pub = Publisher(host, int(port))
@@ -101,6 +112,13 @@ def main():
             "gaze": None if g is None else [round(g[0], 4), round(g[1], 4)],
             "target": sel.target_id, "dwell": round(sel.progress, 3), "best_guess": sel.best_guess,
             "objects": list(objs.values()),
+            "health": {
+                "fps": round(fps_ema, 1), "proc_ms": round(proc_ms, 1), "shape": backend,
+                "rejected": det.rejected,
+                "gaze_age_ms": gaze.age_ms() if hasattr(gaze, "age_ms") else None,
+                "frame_age_ms": round(getattr(src, "frame_age_ms", 0.0), 1),
+                "dropped_frames": getattr(src, "dropped", 0),
+            },
         }
         if marker:
             state["markers"] = [{k: m[k] for k in ("id", "x", "y")} for m in markers]
@@ -123,14 +141,18 @@ def main():
         last_wall = now
         fps_ema = 0.9 * fps_ema + 0.1 * (1.0 / max(dt, 1e-6))
         want_snap = args.headless and args.snapshot_every and idx % args.snapshot_every == 0
-        if show or want_snap:
-            hud = [f"{fps_ema:4.1f} fps  proc {proc_ms:4.1f} ms  gaze:{gaze.name}  objs:{len(tracks)}  locks:{locks}",
+        want_stream = stream is not None and stream.wants_frame()
+        if show or want_snap or want_stream:
+            hud = [f"{fps_ema:4.1f} fps  proc {proc_ms:4.1f} ms  shape:{backend}  gaze:{gaze.name}  "
+                   f"objs:{len(tracks)}  rejected:{det.rejected}  locks:{locks}",
                    ("REC " if rec else "") + ("PAUSED " if paused else "") +
                    (f"depth ref {cfg['depth']['ref_distance_cm']}cm" if cfg['depth']['ref_distance_cm'] else "depth: uncalibrated (c)")]
             img = overlay.draw(frame, tracks, depth, cfg, gaze_px, sel, hud,
                                flash_id if now < flash_until else None, markers, show_feat)
             if view_mask:
-                img = overlay.mask_view(det.masks(frame), cfg, frame.shape)
+                img = overlay.mask_view(det.label_map(frame), det.names, cfg)
+            if want_stream:
+                stream.publish(img)
             if want_snap:
                 snap_dir.mkdir(parents=True, exist_ok=True)
                 cv2.imwrite(str(snap_dir / f"frame_{idx:05d}.png"), img)
@@ -172,6 +194,8 @@ def main():
     if rec:
         rec.close()
         print(f"[rec] saved {rec.dir}")
+    if hasattr(src, "close"):
+        src.close()
     cv2.destroyAllWindows()
 
 

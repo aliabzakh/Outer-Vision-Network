@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Tune HSV colour ranges on the real camera/lighting, then save to config.json.
+"""Register each object's colour under the real lighting, then save to config.json.
 
   python tools/tune_colors.py --source 0
 
-Click an object -> its colour range is set from the clicked patch.
-Trackbars fine-tune the selected colour. Keys: 1-9 select colour | s save | q quit
+Press 1-8 to pick a colour slot, then click that object: its median HSV becomes the prototype.
+Right half = every pixel painted with the colour it is assigned to (black = ignored).
+Keys: 1-8 slot | [ ] shrink/grow max_dist | s save | q quit
 """
 import argparse
 import sys
@@ -14,7 +15,7 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from outer_vision import config  # noqa: E402
+from outer_vision import config, overlay  # noqa: E402
 from outer_vision.detector import Detector  # noqa: E402
 from outer_vision.io import open_source  # noqa: E402
 
@@ -27,66 +28,47 @@ def main():
     ap.add_argument("--config", default="config.json")
     args = ap.parse_args()
     cfg = config.load(args.config)
+    cfg["shape_net"]["enabled"] = False
     names = list(cfg["colors"])
     src = open_source(args.source)
-    state = {"sel": 0, "frame": None, "pushing": False}
-
-    def rng():
-        return cfg["colors"][names[state["sel"]]]["hsv"]
-
-    def push_trackbars():
-        r = rng()
-        state["pushing"] = True   # setTrackbarPos fires on_trackbar with half-updated values
-        # Red wraps around H=0/180: trackbars edit the low range's S/V; H stays as clicked.
-        for i, key in enumerate(["H lo", "S lo", "V lo", "H hi", "S hi", "V hi"]):
-            cv2.setTrackbarPos(key, WIN, int(r[0][i]))
-        state["pushing"] = False
-
-    def on_trackbar(_):
-        if state["pushing"]:
-            return
-        vals = [cv2.getTrackbarPos(k, WIN) for k in ["H lo", "S lo", "V lo", "H hi", "S hi", "V hi"]]
-        r = rng()
-        if len(r) == 1:
-            r[0] = vals
-        else:  # wrapped red: keep hue split, share S/V floors
-            for band in r:
-                band[1], band[2], band[4], band[5] = vals[1], vals[2], vals[4], vals[5]
+    st = {"sel": 0, "frame": None, "det": Detector(cfg)}
 
     def on_click(event, x, y, *_):
-        if event != cv2.EVENT_LBUTTONDOWN or state["frame"] is None:
+        if event != cv2.EVENT_LBUTTONDOWN or st["frame"] is None:
             return
-        hsv = cv2.cvtColor(state["frame"], cv2.COLOR_BGR2HSV)
-        patch = hsv[max(0, y - 4):y + 5, max(0, x % hsv.shape[1] - 4):x % hsv.shape[1] + 5].reshape(-1, 3)
-        h, s, v = np.median(patch, 0).astype(int)
-        s_lo, v_lo = max(60, s - 70), max(40, v - 90)
-        name = names[state["sel"]]
-        if h < 10 or h > 170:   # red-ish: needs both ends of the hue circle
-            cfg["colors"][name]["hsv"] = [[0, s_lo, v_lo, (h + 10) % 180 if h < 10 else 10, 255, 255],
-                                          [h - 10 if h > 170 else 170, s_lo, v_lo, 180, 255, 255]]
-        else:
-            cfg["colors"][name]["hsv"] = [[max(0, h - 10), s_lo, v_lo, min(180, h + 10), 255, 255]]
-        print(f"{name}: clicked HSV=({h},{s},{v}) -> {cfg['colors'][name]['hsv']}", flush=True)
-        push_trackbars()
+        f = st["frame"]
+        x %= f.shape[1]
+        hsv = cv2.cvtColor(f, cv2.COLOR_BGR2HSV)
+        patch = hsv[max(0, y - 5):y + 6, max(0, x - 5):x + 6].reshape(-1, 3).astype(int)
+        # circular median for hue (red straddles 0/180)
+        hue = patch[:, 0]
+        if hue.max() - hue.min() > 90:
+            hue = np.where(hue < 90, hue + 180, hue)
+        h = int(np.median(hue)) % 180
+        s, v = (int(np.median(patch[:, 1])), int(np.median(patch[:, 2])))
+        name = names[st["sel"]]
+        cfg["colors"][name]["hsv"] = [h, s, v]
+        cfg["colors"][name]["bgr"] = [int(c) for c in f[y, x]]
+        st["det"] = Detector(cfg)
+        print(f"{name} <- HSV ({h}, {s}, {v})", flush=True)
+        if s < cfg["color_match"]["s_min"]:
+            print(f"  warning: saturation {s} < s_min {cfg['color_match']['s_min']}; this object will be ignored", flush=True)
 
     cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
-    for key, mx in [("H lo", 180), ("S lo", 255), ("V lo", 255), ("H hi", 180), ("S hi", 255), ("V hi", 255)]:
-        cv2.createTrackbar(key, WIN, 0, mx, on_trackbar)
     cv2.setMouseCallback(WIN, on_click)
-    push_trackbars()
-
     while True:
         frame, _, _ = src.read()
         if frame is None:
             break
         scale = cfg["process_width"] / frame.shape[1]
         frame = cv2.resize(frame, None, fx=scale, fy=scale)
-        state["frame"] = frame
-        mask = Detector(cfg).masks(frame)[names[state["sel"]]]
-        vis = np.hstack([frame, cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)])
-        label = "  ".join(f"[{i + 1}]{n}" + ("*" if i == state["sel"] else "") for i, n in enumerate(names))
-        cv2.putText(vis, label + "   click object | s save | q quit", (8, 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
+        st["frame"] = frame
+        det = st["det"]
+        vis = np.hstack([frame, overlay.mask_view(det.label_map(frame), det.names, cfg)])
+        slots = "  ".join(f"[{i + 1}]{n}" + ("*" if i == st["sel"] else "") for i, n in enumerate(names))
+        for i, line in enumerate([slots, f"max_dist {cfg['color_match']['max_dist']:.2f}  [ ] adjust | s save | q quit"]):
+            cv2.putText(vis, line, (8, 20 + 20 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3, cv2.LINE_AA)
+            cv2.putText(vis, line, (8, 20 + 20 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
         cv2.imshow(WIN, vis)
         k = cv2.waitKey(30) & 0xFF
         if k == ord("q"):
@@ -94,9 +76,11 @@ def main():
         if k == ord("s"):
             config.save(cfg, args.config)
             print(f"saved {args.config}", flush=True)
+        if k in (ord("["), ord("]")):
+            cfg["color_match"]["max_dist"] = max(0.3, cfg["color_match"]["max_dist"] + (0.1 if k == ord("]") else -0.1))
+            st["det"] = Detector(cfg)
         if ord("1") <= k <= ord("9") and k - ord("1") < len(names):
-            state["sel"] = k - ord("1")
-            push_trackbars()
+            st["sel"] = k - ord("1")
     cv2.destroyAllWindows()
 
 

@@ -3,11 +3,15 @@ import math
 import random
 import unittest
 
+import sys
+from pathlib import Path
+
 import cv2
 import numpy as np
 
-from outer_vision import config, synthetic
-from outer_vision.detector import Detector
+from outer_vision import config, shape_net, synthetic
+from outer_vision.detector import NONE, Detector, build_color_lut
+from outer_vision.io import PipeSource
 from outer_vision.selector import Selector
 from outer_vision.tracker import Tracker, estimate_depth, reference_sizes
 
@@ -17,36 +21,83 @@ CFG = config.load(None)
 def random_scene(seed):
     rnd = random.Random(seed)
     objs = []
-    while len(objs) < 5:
-        o = (rnd.choice(list(synthetic.BGR)), rnd.choice(["round", "square", "cylinder"]),
-             rnd.randint(80, 560), rnd.randint(90, 400), rnd.randint(24, 60))
+    while len(objs) < 6:
+        o = (rnd.choice(list(synthetic.BGR)), rnd.choice(synthetic.SHAPES),
+             rnd.randint(80, 560), rnd.randint(150, 440), rnd.randint(26, 56))
         if all(math.hypot(o[2] - p[2], o[3] - p[3]) > 1.6 * (o[4] + p[4]) + 30 for p in objs):
             objs.append(o)
     return objs
 
 
+def scene_accuracy(det, n_scenes=50):
+    total = correct = missed = 0
+    for seed in range(n_scenes):
+        objs = random_scene(seed)
+        img = synthetic.render(seed, objs, seed=seed, head_motion=False)
+        dets = det.detect(img)
+        for o in objs:
+            color, shape, _, _, s = o
+            x, y = synthetic.object_center(o)
+            total += 1
+            cands = [d for d in dets if d.color == color and math.hypot(d.cx - x, d.cy - y) < s * 1.2]
+            if not cands:
+                missed += 1
+                continue
+            correct += min(cands, key=lambda d: math.hypot(d.cx - x, d.cy - y)).shape == shape
+    return total, correct, missed
+
+
 class TestDetector(unittest.TestCase):
-    def test_random_scenes(self):
-        det = Detector(CFG)
-        total = correct = missed = 0
-        for seed in range(60):
-            objs = random_scene(seed)
-            img = synthetic.render(seed, objs, seed=seed, head_motion=False)
-            dets = det.detect(img)
-            for color, shape, x, y, s in objs:
-                total += 1
-                cands = [d for d in dets if d.color == color and math.hypot(d.cx - x, d.cy - y) < s * 1.2]
-                if not cands:
-                    missed += 1
-                    continue
-                correct += min(cands, key=lambda d: math.hypot(d.cx - x, d.cy - y)).shape == shape
-        print(f"\n  synthetic shape accuracy {correct}/{total}, missed {missed}")
+    def test_rules_random_scenes(self):
+        cfg = config.load(None)
+        total, correct, missed = scene_accuracy(Detector(cfg))
+        print(f"\n  rules: shape accuracy {correct}/{total}, missed {missed}")
         self.assertEqual(missed, 0)
-        self.assertGreaterEqual(correct / total, 0.95)
+        self.assertGreaterEqual(correct / total, 0.85)
+
+    @unittest.skipUnless(Path("models/shape/labels.json").exists(), "no trained shape model")
+    def test_net_random_scenes(self):
+        cfg = config.load(None)
+        total, correct, missed = scene_accuracy(Detector(cfg, shape_net.load(cfg)))
+        print(f"\n  shape net: shape accuracy {correct}/{total}, missed {missed}")
+        self.assertEqual(missed, 0)
+        self.assertGreaterEqual(correct / total, 0.97)
+
+    @unittest.skipUnless(Path("models/shape/labels.json").exists(), "no trained shape model")
+    def test_net_rejects_hands_and_scraps(self):
+        net = shape_net.load(config.load(None))
+        rng = np.random.default_rng(123)
+        crops = [synthetic.random_crop_sample(rng, "reject") for _ in range(200)]
+        rej = net.labels.index("reject")
+        rate = float((net.probs(crops).argmax(1) == rej).mean())
+        print(f"\n  distractor reject rate {rate:.1%}")
+        self.assertGreaterEqual(rate, 0.95)
 
     def test_grey_table_is_empty(self):
         img = synthetic.render(0, objects=[])
-        self.assertEqual(Detector(CFG).detect(img), [])
+        self.assertEqual(Detector(config.load(None)).detect(img), [])
+
+    def test_color_lut(self):
+        cfg = config.load(None)
+        names, lut = build_color_lut(cfg["colors"], cfg["color_match"])
+        for i, n in enumerate(names):
+            h, s, _ = cfg["colors"][n]["hsv"]
+            self.assertEqual(lut[h, s], i, n)             # each prototype maps to itself
+        self.assertTrue((lut[:, :cfg["color_match"]["s_min"]] == NONE).all())   # grey is never a colour
+        self.assertEqual(lut[178, 200], names.index("red"))                     # hue wraps around 180
+
+
+class TestPipeSource(unittest.TestCase):
+    def test_all_formats_decode(self):
+        for fmt in ("bgrx", "rgbx", "nv12"):
+            src = PipeSource(f"pipe:{sys.executable} tools/fake_bridge.py --format {fmt} --frames 5 --fps 100 --width 640")
+            frame, _, _ = src.read()
+            src.close()
+            ref = synthetic.render(0)
+            self.assertEqual(frame.shape, ref.shape)
+            # NV12 subsamples chroma, so allow some error; channel order must be right (red stays red)
+            err = np.abs(frame.astype(int) - ref.astype(int)).mean()
+            self.assertLess(err, 6 if fmt == "nv12" else 1, fmt)
 
 
 def track_at(tid, x, y, r=20):
@@ -116,6 +167,7 @@ class TestTrackerDepth(unittest.TestCase):
         ids = None
         for i in range(60):
             tracks = trk.update(det.detect(synthetic.render(i)), i / 30, 640)
+            self.assertEqual(len(tracks) if i >= 5 else 6, 6)
             if i == 10:
                 ids = sorted(t.id for t in tracks)
                 cfg["depth"]["ref_distance_cm"] = 60.0

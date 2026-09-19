@@ -26,6 +26,8 @@ def draw(frame, tracks, depth, cfg, gaze_px, selector, hud_lines, flash_id=None,
         x, y, w, h = t.det.bbox
         dist, vol = depth.get(t.id, (None, None))
         label = f"#{t.id} {t.color} {t.shape}"
+        if t.det.shape_conf < 0.999:
+            label += f" {t.det.shape_conf:.0%}"
         if dist is not None:
             label += f" {dist:.0f}cm v{vol:.2f}"
         if t.det.partial:
@@ -35,6 +37,8 @@ def draw(frame, tracks, depth, cfg, gaze_px, selector, hud_lines, flash_id=None,
             f = t.det.features
             _text(img, f"cf{f['circlefill']:.2f} rf{f['rectfill']:.2f} ar{f['aspect']:.2f} v{f['vertices']} so{f['solidity']:.2f}",
                   (x, y + h + 14), 0.38)
+            if "net" in f:
+                _text(img, " ".join(f"{k[:3]}{v:.2f}" for k, v in f["net"].items()), (x, y + h + 28), 0.38)
         if is_target and selector.progress > 0:
             c = (int(t.cx), int(t.cy))
             r = int(max(w, h) * 0.6) + 6
@@ -54,9 +58,9 @@ def draw(frame, tracks, depth, cfg, gaze_px, selector, hud_lines, flash_id=None,
     return img
 
 
-def mask_view(masks: dict, cfg: dict, shape) -> np.ndarray:
-    """All colour masks painted in their display colour, to see what the thresholds catch."""
-    out = np.zeros((*shape[:2], 3), np.uint8)
-    for name, m in masks.items():
-        out[m > 0] = cfg["colors"][name].get("bgr", (255, 255, 255))
-    return out
+def mask_view(label_map: np.ndarray, names: list, cfg: dict) -> np.ndarray:
+    """Every pixel painted with the colour prototype it was assigned to (black = none)."""
+    palette = np.zeros((256, 3), np.uint8)
+    for i, n in enumerate(names):
+        palette[i] = cfg["colors"][n].get("bgr", (255, 255, 255))
+    return palette[label_map]

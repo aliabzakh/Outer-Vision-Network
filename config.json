@@ -3,13 +3,157 @@
   "colors": {
     "red": {
       "hsv": [
-        [
-          0,
-          175,
-          73,
-          10,
-          255,
-          255
-        ],
-        [
-          
+        0,
+        200,
+        170
+      ],
+      "bgr": [
+        40,
+        40,
+        230
+      ]
+    },
+    "orange": {
+      "hsv": [
+        12,
+        210,
+        220
+      ],
+      "bgr": [
+        20,
+        120,
+        245
+      ]
+    },
+    "yellow": {
+      "hsv": [
+        27,
+        200,
+        210
+      ],
+      "bgr": [
+        40,
+        220,
+        240
+      ]
+    },
+    "green": {
+      "hsv": [
+        62,
+        170,
+        150
+      ],
+      "bgr": [
+        60,
+        200,
+        60
+      ]
+    },
+    "cyan": {
+      "hsv": [
+        90,
+        180,
+        170
+      ],
+      "bgr": [
+        220,
+        210,
+        40
+      ]
+    },
+    "blue": {
+      "hsv": [
+        110,
+        200,
+        170
+      ],
+      "bgr": [
+        230,
+        120,
+        40
+      ]
+    },
+    "purple": {
+      "hsv": [
+        135,
+        150,
+        140
+      ],
+      "bgr": [
+        180,
+        60,
+        150
+      ]
+    },
+    "pink": {
+      "hsv": [
+        165,
+        140,
+        210
+      ],
+      "bgr": [
+        180,
+        120,
+        245
+      ]
+    }
+  },
+  "color_match": {
+    "s_min": 90,
+    "v_min": 60,
+    "hue_tol": 8,
+    "sat_tol": 90,
+    "max_dist": 1.7
+  },
+  "shape_net": {
+    "enabled": true,
+    "model_dir": "models/shape",
+    "backend": "ncnn",
+    "threads": 2,
+    "reject_min_prob": 0.6
+  },
+  "detector": {
+    "blur": 5,
+    "morph": 5,
+    "min_area_frac": 0.0015,
+    "max_area_frac": 0.25,
+    "poly_eps": 0.02,
+    "round_min_circlefill": 0.86,
+    "square_max_aspect": 1.5,
+    "square_min_rectfill": 0.9,
+    "square_max_vertices": 6,
+    "square_min_solidity": 0.9,
+    "cylinder_min_aspect": 1.25,
+    "border_margin": 3
+  },
+  "tracker": {
+    "max_jump_frac": 0.15,
+    "max_missing_s": 0.5,
+    "confirm_hits": 3,
+    "smooth": 0.5,
+    "shape_votes": 9
+  },
+  "selector": {
+    "dwell_s": 0.5,
+    "grace_s": 0.15,
+    "select_radius_frac": 0.03,
+    "best_guess_radius_frac": 0.12,
+    "switch_margin_frac": 0.02,
+    "gaze_max_age_s": 0.2
+  },
+  "depth": {
+    "ref_distance_cm": null,
+    "ref_size": {},
+    "near_cm": 40.0,
+    "far_cm": 100.0,
+    "min_volume": 0.2
+  },
+  "gaze_udp_port": 5005,
+  "events": {
+    "host": "127.0.0.1",
+    "port": 5006
+  },
+  "calib_marker": {
+    "dictionary": "DICT_4X4_50"
+  }
+}

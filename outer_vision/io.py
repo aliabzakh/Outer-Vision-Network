@@ -2,12 +2,18 @@
 from __future__ import annotations
 
 import json
+import shlex
 import socket
+import struct
+import subprocess
+import sys
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import cv2
+import numpy as np
 
 from . import synthetic
 
@@ -64,9 +70,92 @@ class SyntheticSource:
         return synthetic.render(self.idx), self.idx / self.fps, self.idx
 
 
+class PipeSource:
+    """Frames from qnx/camera_bridge (or anything speaking its OVF1 format) on a pipe.
+
+    spec "pipe:-" reads stdin; "pipe:<command>" launches the command. A reader thread keeps only the
+    NEWEST frame, so a slow consumer drops frames instead of falling behind (latency stays bounded).
+    """
+    live = True
+    HDR = struct.Struct("<4sIIIQ")
+
+    def __init__(self, spec: str):
+        cmd = spec.split(":", 1)[1]
+        if cmd == "-":
+            self.proc, self.stream = None, sys.stdin.buffer
+        else:
+            self.proc = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, bufsize=0)
+            self.stream = self.proc.stdout
+        self.fps = 30.0
+        self.idx = -1
+        self._latest = None           # (bgr, arrival_monotonic)
+        self._cond = threading.Condition()
+        self._eof = False
+        self.dropped = 0
+        threading.Thread(target=self._reader, daemon=True).start()
+
+    def _read_exact(self, n):
+        buf = bytearray()
+        while len(buf) < n:
+            chunk = self.stream.read(n - len(buf))
+            if not chunk:
+                return None
+            buf += chunk
+        return bytes(buf)
+
+    def _reader(self):
+        while True:
+            hdr = self._read_exact(self.HDR.size)
+            if hdr is None:
+                break
+            magic, w, h, fmt, _ts = self.HDR.unpack(hdr)
+            if magic != b"OVF1":
+                print("[pipe] bad frame header; stream out of sync", file=sys.stderr)
+                break
+            n = w * h * 4 if fmt in (1, 2) else w * h * 3 // 2
+            data = self._read_exact(n)
+            if data is None:
+                break
+            arr = np.frombuffer(data, np.uint8)
+            if fmt == 1:
+                bgr = cv2.cvtColor(arr.reshape(h, w, 4), cv2.COLOR_RGBA2BGR)
+            elif fmt == 2:
+                bgr = cv2.cvtColor(arr.reshape(h, w, 4), cv2.COLOR_BGRA2BGR)
+            else:
+                bgr = cv2.cvtColor(arr.reshape(h * 3 // 2, w), cv2.COLOR_YUV2BGR_NV12)
+            with self._cond:
+                if self._latest is not None:
+                    self.dropped += 1
+                self._latest = (bgr, time.monotonic())
+                self._cond.notify()
+        with self._cond:
+            self._eof = True
+            self._cond.notify()
+
+    def read(self):
+        with self._cond:
+            while self._latest is None and not self._eof:
+                self._cond.wait(timeout=1.0)
+            if self._latest is None:
+                return None, time.monotonic(), self.idx
+            frame, arrived = self._latest
+            self._latest = None
+        self.idx += 1
+        self.frame_age_ms = (time.monotonic() - arrived) * 1000
+        return frame, time.monotonic(), self.idx
+
+    def close(self):
+        if self.proc is not None:
+            self.proc.terminate()
+            self.proc.wait(timeout=2)
+            self.proc.stdout.close()
+
+
 def open_source(spec: str):
     if spec == "synthetic":
         return SyntheticSource()
+    if spec.startswith("pipe:"):
+        return PipeSource(spec)
     if Path(spec).is_file():
         return VideoSource(spec)
     return CameraSource(spec)
@@ -126,6 +215,10 @@ class UdpGaze:
         if g is None or time.monotonic() - g[2] > self.max_age:
             return None
         return g[0], g[1]
+
+    def age_ms(self):
+        g = self.latest
+        return None if g is None else round((time.monotonic() - g[2]) * 1000, 1)
 
 
 class ReplayGaze:
@@ -206,6 +299,59 @@ class Recorder:
         if self.writer is not None:
             self.writer.release()
         self.log.close()
+
+
+class MjpegServer:
+    """Debug overlay as an MJPEG stream: open http://<pi>:<port>/ on the Mac. Stdlib only."""
+
+    PAGE = (b"<html><head><title>outer-vision</title></head><body style='margin:0;background:#111'>"
+            b"<img src='/stream' style='width:100%;height:auto'></body></html>")
+
+    def __init__(self, port: int, quality=70, max_fps=15):
+        self.quality, self.min_dt = quality, 1.0 / max_fps
+        self._jpeg, self._last = None, 0.0
+        self._cond = threading.Condition()
+        srv = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                if self.path != "/stream":
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html")
+                    self.end_headers()
+                    self.wfile.write(srv.PAGE)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+                self.end_headers()
+                try:
+                    while True:
+                        with srv._cond:
+                            srv._cond.wait(timeout=2.0)
+                            jpg = srv._jpeg
+                        if jpg is None:
+                            continue
+                        self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                                         + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n")
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        self.httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+        self.httpd.daemon_threads = True
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def wants_frame(self) -> bool:
+        return time.monotonic() - self._last >= self.min_dt
+
+    def publish(self, img):
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, self.quality])
+        if ok:
+            with self._cond:
+                self._jpeg, self._last = buf.tobytes(), time.monotonic()
+                self._cond.notify_all()
 
 
 class CalibMarker:
