@@ -4,7 +4,7 @@ Everything we knowingly cut for the hackathon, and what "done properly" looks li
 
 | # | Area | v0 compromise | Future edition |
 |---|---|---|---|
-| 1 | Audio / portability | Sound on the Mac; debug overlay streamed to the Mac over Wi-Fi (MJPEG) | USB speaker on the wearable, audio synthesised on the QNX Pi at real-time priority |
+| 1 | Audio / portability | Vision, Maestro and sound run on the laptop; the Pi only streams the camera over Wi-Fi (adds ~50–120 ms) | Everything on the wearable with a small speaker; the cloud only for Maestro |
 | 2 | Distance | Gaze calibrated at one fixed working distance | Variable depth: intersect the gaze ray with the table plane, or add a depth/stereo camera |
 | 3 | Depth for volume | Distance from apparent size, needs one reference capture per object type (`c` key) | Table-plane geometry or a learned monocular depth model on the RDK X5 BPU; no reference capture |
 | 4 | "Farther back on the table" | Approximated as distance from the camera, so it shifts if the user leans | Position on the table (the table itself as the reference frame) |
@@ -22,10 +22,12 @@ Everything we knowingly cut for the hackathon, and what "done properly" looks li
 | 16 | Hands | **v1:** CNN "reject" class drops hands, pens and paper (100% on synthetic; unproven on real) | Train reject class on real hands |
 | 17 | Edges | Objects cut off by the frame edge are flagged `partial` and get no depth | Track through the edge; wider lens |
 | 18 | Sync | Eye and world cameras are unsynchronised; gaze is paired with the newest frame (≤ 0.2 s old) | Hardware trigger or timestamp alignment |
-| 19 | Transport | UDP JSON with no delivery guarantee | Shared memory / QNX message passing on-device |
-| 20 | Language | Python + OpenCV on the target | Port hot paths to C/C++ (the modules map 1:1 to OpenCV C++) |
+| 19 | Transport | UDP JSON with no delivery guarantee | A reliable channel for lock events (they're rare) |
+| 20 | Language | Python + OpenCV | Fine for a laptop; port hot paths if it moves onto the wearable |
 | 21 | Markers | ArUco marker only for calibration, to stay "works anywhere" | None at all |
-| 22 | QNX camera | `camera_bridge` follows QNX's own example but hasn't been compiled or run yet; frames go through a pipe with a copy | Zero-copy shared memory, run as a real-time QNX process |
-| 23 | ncnn precision | ncnn runs fp16 on ARM; the export check allows ≤2% probability drift | Fine as is; re-verify on the Pi |
-| 24 | Reliability | Health numbers are reported, but no watchdog restarts a stalled process yet | QNX watchdog / high-availability manager restarts camera, vision and audio independently |
-| 25 | RDK X5 | Dropped; it doesn't fit the use case | n/a |
+| 22 | QNX | Dropped for feasibility; standard Pi OS + laptop instead | n/a |
+| 23 | Voice latency | Maestro makes two calls (understand, then speak) so the voice matches the validated actions: ~1–3 s total | One streaming call with tool-calling, or the OMNI realtime API |
+| 24 | Talk trigger | `v` key or dwell on a printed TALK card; always-listening VAD is off by default because the venue is loud | Wake word / blink gesture from the eye camera |
+| 25 | Privacy | A frame + audio clip leave the device only when the user triggers Maestro; faces aren't blurred yet | On-device blur of faces/people before upload |
+| 26 | Assistant memory | Last 6 turns only, lost on restart | Per-user profile (preferred dwell, instruments, songs learned) |
+| 27 | Reliability | Health numbers are reported, but nothing restarts a stalled process | Supervisor process + heartbeat |

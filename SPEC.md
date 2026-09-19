@@ -8,7 +8,7 @@ Head-mounted, single-eye gaze tracker. Where you look on a table selects an obje
 | Area | Decision |
 |---|---|
 | Rig | Head-mounted. 1 eye camera (one eye), 1 world camera, both rigid to head |
-| Compute | Raspberry Pi on QNX (going for the QNX prize) + RDK X5 (going for its track); Mac for v0 display/audio |
+| Compute | Pi 5 streams the camera; the laptop runs vision + Maestro (OMNI, cloud) + audio |
 | Targets | ~5 still, wallet-sized objects, no overlap, clean table, indoor controlled light |
 | Shapes / colours | round, cylinder, square / red, yellow, green, blue (black/white dropped: shadows, glare) |
 | Detection | Classical CV (colour threshold + contour shape), no VLM in the hot path |
@@ -16,14 +16,14 @@ Head-mounted, single-eye gaze tracker. Where you look on a table selects an obje
 | Calibration | Per user, short startup calibration OK; no input during use |
 | Latency | 100–200 ms target |
 | Output | Location only (no naming). Live debug overlay. Record sessions (compressed) |
-| Language | Python first; port hot paths to C/C++ if QNX needs it |
+| Language | Python |
 | Success | Passes reliably in a live demo |
 
 | Team | 4 people, 30 h. This repo = OUTER vision only; gaze tracking is a teammate's |
 | Mapping | colour → pitch, shape → instrument, farther back → quieter; note plays once per look |
 | Mode | Free play |
 | Framing | Assistive instrument for people who can't use their hands (ALS, paralysis): gaze is their only input, so it must not fail |
-| v1 outer vision | Colour-prototype LUT (8 colours) + ShapeCNN on ncnn (QNX AI module) with rules fallback; QNX camera bridge; MJPEG overlay to Mac; health in state |
+| v2 outer vision | Colour LUT (8 colours) + ShapeCNN (ONNX/OpenCV) with rules fallback; Pi camera over MJPEG; Maestro voice assistant on OMNI; lessons; synth; optional Sentry |
 | Rig | Cameras on glasses; Pi worn on the body; minimal markers (market as "works anywhere") |
 
 ## TODO / later
@@ -32,17 +32,19 @@ Head-mounted, single-eye gaze tracker. Where you look on a table selects an obje
 - [ ] Moving targets
 - [ ] Servo output (shelved in favour of music game)
 
-## Hardware (confirmed)
-- 1× QNX Raspberry Pi 5 Starter Kit, 1× Raspberry Pi 5 (4 GB), 1× RDK X5, 2× 16 GB microSD
-- 2× QNX Raspberry Pi Camera Module 3 (IMX708: **the only sensor with a QNX driver**, `qnx-sf-camera-imx708`)
-- 2× Raspberry Pi Camera Module (older: no QNX driver; use on the Pi OS Pi 5 / RDK X5)
-- Pi 5 has 2 CSI ports, so both CM3s go on the QNX Pi. Pi 5 has **no 3.5 mm audio jack**
+## Hardware
+- Raspberry Pi 5 (Pi OS) + Camera Modules on glasses → MJPEG over Wi-Fi → laptop runs vision, Maestro, audio
+- QNX dropped (2026-09-19) for feasibility; RDK X5 dropped
 
-## Prize targets
-- QNX: must run on QNX OS **and** use an AI module from oss.qnx.com (tflite-runtime, ncnn, mediapipe, onnx,
-  pytorch, llama.cpp, whisper.cpp...). python3-opencv 4.12 + python3-numpy exist for QNX 8 aarch64
-- Finalist (main award)
-- RDK X5: dropped (doesn't fit the use case)
+## Prize targets (re-checked 2026-09-19)
+| Track | Status |
+|---|---|
+| Finalist | primary: playful + assistive |
+| Huawei OMNI Live | **built**: Maestro (vision + speech + language, gaze-resolved "this"). Apply for credits at https://luma.com/0fhypcu0 (200 keys, first come); taking them requires submitting to this track |
+| Solana ($5k) + Badge Hack ($2.5k) | ideas in the chat thread; nothing built yet |
+| Sentry | hooks built (`SENTRY_DSN`): frame/stage traces, lock + utterance logs, profiling. Judged on how the data changed the project, so actually use it to find and fix something |
+| LeLamp / Bracket Bot | only if their hardware is free: a lamp that spotlights the object you're looking at (the original servo idea) |
+| OpenAI / Baseten / Backboard | not a fit unless we route a model call through them |
 
 ## Open questions
 

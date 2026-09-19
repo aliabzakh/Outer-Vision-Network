@@ -32,8 +32,6 @@ DEFAULTS = {
     "shape_net": {
         "enabled": True,
         "model_dir": "models/shape",
-        "backend": "ncnn",          # "ncnn" (QNX AI module) or "opencv" (ONNX via cv2.dnn)
-        "threads": 2,
         "reject_min_prob": 0.6,     # drop a candidate (hand, scrap, pen) above this "reject" probability
     },
     "detector": {
@@ -72,6 +70,23 @@ DEFAULTS = {
         "near_cm": 40.0,              # volume 1.0 at/inside this
         "far_cm": 100.0,              # volume min_volume at/beyond this
         "min_volume": 0.2,
+    },
+    "music": {
+        "notes": {"red": "C4", "orange": "D4", "yellow": "E4", "green": "F4",
+                  "cyan": "G4", "blue": "A4", "purple": "B4", "pink": "C5"},
+        "instruments": {"round": "marimba", "square": "piano", "cylinder": "flute"},
+        "available_instruments": ["piano", "marimba", "flute", "strings", "bell", "drum", "synth"],
+    },
+    "omni": {
+        # OpenAI-compatible endpoint serving an OMNI model. Key from env OMNI_API_KEY, never from this file.
+        "base_url": "https://yibuapi.com/v1",
+        "model": "qwen3.5-omni-flash",
+        "voice": "Cherry",
+        "speak_with": "omni",          # "omni" (model's own voice) | "local" (macOS `say`) | "none"
+        "trigger": ["key", "marker"],  # "key" = press v; "marker" = dwell on the talk marker; "vad" = always listening
+        "talk_marker_id": 7,           # ArUco id of the printed "talk" card (tools/make_marker.py --id 7)
+        "max_utterance_s": 8.0,
+        "history_turns": 6,
     },
     "gaze_udp_port": 5005,
     "events": {"host": "127.0.0.1", "port": 5006},
