@@ -1,0 +1,125 @@
+{
+  "process_width": 640,
+  "colors": {
+    "red": {
+      "hsv": [
+        [
+          0,
+          120,
+          70,
+          8,
+          255,
+          255
+        ],
+        [
+          165,
+          120,
+          70,
+          180,
+          255,
+          255
+        ]
+      ],
+      "bgr": [
+        40,
+        40,
+        230
+      ]
+    },
+    "yellow": {
+      "hsv": [
+        [
+          20,
+          110,
+          90,
+          35,
+          255,
+          255
+        ]
+      ],
+      "bgr": [
+        40,
+        220,
+        240
+      ]
+    },
+    "green": {
+      "hsv": [
+        [
+          40,
+          80,
+          50,
+          85,
+          255,
+          255
+        ]
+      ],
+      "bgr": [
+        60,
+        200,
+        60
+      ]
+    },
+    "blue": {
+      "hsv": [
+        [
+          95,
+          110,
+          50,
+          130,
+          255,
+          255
+        ]
+      ],
+      "bgr": [
+        230,
+        120,
+        40
+      ]
+    }
+  },
+  "detector": {
+    "blur": 5,
+    "morph": 5,
+    "min_area_frac": 0.0015,
+    "max_area_frac": 0.25,
+    "poly_eps": 0.02,
+    "round_min_circlefill": 0.86,
+    "square_max_aspect": 1.5,
+    "square_min_rectfill": 0.9,
+    "square_max_vertices": 6,
+    "square_min_solidity": 0.9,
+    "cylinder_min_aspect": 1.25,
+    "border_margin": 3
+  },
+  "tracker": {
+    "max_jump_frac": 0.15,
+    "max_missing_s": 0.5,
+    "confirm_hits": 3,
+    "smooth": 0.5,
+    "shape_votes": 9
+  },
+  "selector": {
+    "dwell_s": 0.5,
+    "grace_s": 0.15,
+    "select_radius_frac": 0.03,
+    "best_guess_radius_frac": 0.12,
+    "switch_margin_frac": 0.02,
+    "gaze_max_age_s": 0.2
+  },
+  "depth": {
+    "ref_distance_cm": null,
+    "ref_size": {},
+    "near_cm": 40.0,
+    "far_cm": 100.0,
+    "min_volume": 0.2
+  },
+  "gaze_udp_port": 5005,
+  "events": {
+    "host": "127.0.0.1",
+    "port": 5006
+  },
+  "calib_marker": {
+    "dictionary": "DICT_4X4_50"
+  }
+}
