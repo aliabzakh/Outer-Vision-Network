@@ -83,6 +83,11 @@ or `{"type":"gesture","kind":"double","focus":null}` (`focus` = object under gaz
 `{"type":"assistant","command":{"command":"change_instrument","target":4},"say","actions","results","source":"omni"|"fallback"}`
 (or `{"type":"assistant","command",...,"error"}`). **`music`**: `{"type":"music","overrides":{...},"lesson":{...},"dwell_s":0.6}` after changes.
 
+**`song`**, when a phrase ends (no note for `song.idle_s` = 8 s, or on quit, at least 4 notes):
+`{"type":"song","song_id","fingerprint","captured_at_ms","notes":12,"path":"songs/<ms>_<id>.json"}`. The file holds
+every note plus the table layout as bearings from the user's head (`azimuth_deg`, `elevation_deg`, `distance_cm`);
+see `outer_vision/song.py` for the fingerprint and `marketplace/` for what uses it.
+
 `state` also carries `eyes_closed`, `dwell_s`, `lesson` (with `next`: the note to look at),
 `menu: null | {state: object|space|space_lesson|swap_pick, focus, options: {left, right, both}}` and
 `assistant: {status: idle|thinking|speaking, caption, decide_ms, first_audio_ms, source}`.

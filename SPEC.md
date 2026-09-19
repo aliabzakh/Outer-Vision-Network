@@ -46,7 +46,8 @@ Head-mounted, single-eye gaze tracker. Where you look on a table selects an obje
 | Finalist | primary: playful + assistive |
 | Huawei OMNI Live | **built**, key in hand: Maestro decides instrument / note / dwell / song from the camera view + gaze focus + play history and speaks in OMNI's voice; OMNI also labels real shape crops offline |
 | ElevenLabs | **built**: instrument samples (sound effects API) repitched per note, menu voice prompts (TTS), live TTS fallback |
-| Solana ($5k) + Badge Hack ($2.5k) | on hold until the core demo is solid (eye-signing, MINT card QR, audience memos) |
+| Solana ($5k) | **built (devnet)**: songs saved with a layout fingerprint (object bearings from the head) + timestamp; `marketplace/` mints them as Metaplex Core assets to the player's Privy embedded wallet, list/buy with atomic SOL-for-song swaps |
+| Badge Hack ($2.5k) | on hold |
 | Sentry | hooks built (`SENTRY_DSN`): frame/stage traces, lock + gesture logs, profiling. Judged on how the data changed the project, so actually use it to find and fix something |
 | LeLamp / Bracket Bot | only if their hardware is free: a lamp that spotlights the object you're looking at (the original servo idea) |
 | OpenAI / Baseten / Backboard | not a fit unless we route a model call through them |

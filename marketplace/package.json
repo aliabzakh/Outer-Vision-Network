@@ -1,0 +1,33 @@
+{
+  "name": "outer-vision-marketplace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "server": "node --env-file-if-exists=.env server/index.js",
+    "web": "vite",
+    "build": "vite build",
+    "keygen": "node server/keygen.js",
+    "test": "node --test server/"
+  },
+  "dependencies": {
+    "@metaplex-foundation/mpl-core": "^1.10.0",
+    "@metaplex-foundation/umi": "^1.6.0",
+    "@metaplex-foundation/umi-bundle-defaults": "^1.6.0",
+    "@metaplex-foundation/umi-web3js-adapters": "^1.6.0",
+    "@privy-io/react-auth": "^3.44.0",
+    "@solana-program/memo": "^0.14.1",
+    "@solana-program/system": "^0.14.1",
+    "@solana-program/token": "^0.16.1",
+    "@solana/kit": "^8.3.0",
+    "@solana/web3.js": "^1.99.0",
+    "bs58": "^6.0.0",
+    "express": "^5.2.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.3.0"
+  }
+}

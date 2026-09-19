@@ -225,3 +225,6 @@ __marimo__/
 .venv-train/
 data/
 deploy/wheels/
+
+# Outer Vision songs (captured phrases, for the marketplace)
+songs/

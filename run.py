@@ -29,6 +29,7 @@ from outer_vision.menu import Menu
 from outer_vision.music import Music
 from outer_vision.omni import Assistant
 from outer_vision.selector import Selector
+from outer_vision.song import SongRecorder
 from outer_vision.tracker import Tracker, estimate_depth, reference_sizes
 from outer_vision.voice import Voice
 
@@ -66,6 +67,7 @@ def main():
     ap.add_argument("--no-net", action="store_true", help="ignore the shape net; contour rules only")
     ap.add_argument("--offline", action="store_true", help="never call OMNI; blink commands use the built-in defaults")
     ap.add_argument("--no-audio", action="store_true", help="no speaker: menu prompts and replies are shown, not spoken")
+    ap.add_argument("--no-songs", action="store_true", help="don't save played phrases to songs/ (Solana marketplace)")
     args = ap.parse_args()
 
     config.load_env()
@@ -80,6 +82,7 @@ def main():
     net = shape_net.load(cfg)
     det, trk, sel = Detector(cfg, net), Tracker(cfg), Selector(cfg)
     music = Music(cfg)
+    songs = None if args.no_songs else SongRecorder(cfg)
     backend = net.backend if net else "rules"
     host, port = (args.send.split(":") if args.send else (cfg["events"]["host"], cfg["events"]["port"]))
     pub = Publisher(host, int(port))
@@ -134,6 +137,14 @@ def main():
     frame = t = idx = None
     locks = 0
     key_gestures = []
+
+    def song_done(song):
+        if song is None:
+            return
+        path = songs.save(song)
+        pub.send({"type": "song", "song_id": song["song_id"], "fingerprint": song["fingerprint"],
+                  "captured_at_ms": song["captured_at_ms"], "notes": len(song["notes"]), "path": str(path)})
+        print(f"[song] {len(song['notes'])} notes, fingerprint {song['fingerprint'][:12]} -> {path}", flush=True)
 
     if show:
         cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
@@ -205,12 +216,16 @@ def main():
             recent.append({"note": o.get("note"), "instrument": o.get("instrument"), "best_guess": e["best_guess"],
                            "lesson_correct": None if fb is None else fb["correct"], "at": time.monotonic()})
             flash_id, flash_until = e["id"], time.monotonic() + 0.25
+            if songs:
+                songs.on_lock(o, [{**v, **voices.get(k, {})} for k, v in objs.items()], t)
             telemetry.log("lock", note=o.get("note"), instrument=o.get("instrument"), best_guess=e["best_guess"])
             print(f"[lock] #{e['id']} {o.get('color')} {o.get('shape')} -> {o.get('note')} {o.get('instrument')}"
                   f"{' (best guess)' if e['best_guess'] else ''}"
                   f"{'' if fb is None else ('  lesson ' + ('✓' if fb['correct'] else '✗ want ' + fb['expected']))}"
                   f" t={t:.2f}", flush=True)
 
+        if songs:
+            song_done(songs.tick(t))
         mstate = music.state()
         state = {
             "type": "state", "t": round(t, 4), "frame": idx,
@@ -304,6 +319,8 @@ def main():
         if args.max_frames and idx + 1 >= args.max_frames:
             break
 
+    if songs:
+        song_done(songs.finish())
     if rec:
         rec.close()
         print(f"[rec] saved {rec.dir}")

@@ -1,0 +1,364 @@
+{
+ "version": 1,
+ "song_id": "27c00225b4633f09110933cea7d2f227a6dc1f7924f1da465780bb07669ddf0d",
+ "fingerprint": "a40e0eeea1debf7ec2734cfbfc8f471185ac7c19a315a7591abf0aa333d9bd6f",
+ "layout_hash": "863fc02341b5a8cdbb0be339b7e1fe9e4377030ca9b436431b90d5a63b9b6a9b",
+ "path_hash": "a3af6c77b0de1ad1c60aa8498de6ce52933a60b989b9c96404a6216a5ec124f1",
+ "captured_at_ms": 1789840843974,
+ "captured_at": "2026-09-19T18:00:43Z",
+ "duration_s": 28.7,
+ "quant": {
+  "deg": 3.0,
+  "cm": 10.0,
+  "fov_deg": [
+   66.0,
+   41.0
+  ]
+ },
+ "layout": [
+  {
+   "color": "blue",
+   "shape": "square",
+   "azimuth_deg": 1.82,
+   "elevation_deg": -9.57,
+   "distance_cm": null
+  },
+  {
+   "color": "green",
+   "shape": "cylinder",
+   "azimuth_deg": 20.65,
+   "elevation_deg": -5.62,
+   "distance_cm": null
+  },
+  {
+   "color": "orange",
+   "shape": "square",
+   "azimuth_deg": 26.51,
+   "elevation_deg": 4.1,
+   "distance_cm": null
+  },
+  {
+   "color": "purple",
+   "shape": "cylinder",
+   "azimuth_deg": 13.21,
+   "elevation_deg": 8.12,
+   "distance_cm": null
+  },
+  {
+   "color": "red",
+   "shape": "round",
+   "azimuth_deg": -18.53,
+   "elevation_deg": -7.01,
+   "distance_cm": null
+  },
+  {
+   "color": "yellow",
+   "shape": "round",
+   "azimuth_deg": -9.81,
+   "elevation_deg": 6.83,
+   "distance_cm": null
+  }
+ ],
+ "notes": [
+  {
+   "t": 0.0,
+   "note": "C4",
+   "midi": 60,
+   "instrument": "marimba",
+   "volume": null,
+   "color": "red",
+   "shape": "round",
+   "azimuth_deg": -18.53,
+   "elevation_deg": -7.01,
+   "distance_cm": null
+  },
+  {
+   "t": 1.033,
+   "note": "A4",
+   "midi": 69,
+   "instrument": "piano",
+   "volume": null,
+   "color": "blue",
+   "shape": "square",
+   "azimuth_deg": 2.55,
+   "elevation_deg": -9.7,
+   "distance_cm": null
+  },
+  {
+   "t": 2.267,
+   "note": "F4",
+   "midi": 65,
+   "instrument": "flute",
+   "volume": null,
+   "color": "green",
+   "shape": "cylinder",
+   "azimuth_deg": 20.8,
+   "elevation_deg": -5.02,
+   "distance_cm": null
+  },
+  {
+   "t": 3.533,
+   "note": "E4",
+   "midi": 64,
+   "instrument": "marimba",
+   "volume": null,
+   "color": "yellow",
+   "shape": "round",
+   "azimuth_deg": -11.08,
+   "elevation_deg": 7.61,
+   "distance_cm": null
+  },
+  {
+   "t": 4.667,
+   "note": "B4",
+   "midi": 71,
+   "instrument": "flute",
+   "volume": null,
+   "color": "purple",
+   "shape": "cylinder",
+   "azimuth_deg": 11.25,
+   "elevation_deg": 8.22,
+   "distance_cm": null
+  },
+  {
+   "t": 5.867,
+   "note": "D4",
+   "midi": 62,
+   "instrument": "piano",
+   "volume": null,
+   "color": "orange",
+   "shape": "square",
+   "azimuth_deg": 25.38,
+   "elevation_deg": 3.96,
+   "distance_cm": null
+  },
+  {
+   "t": 7.1,
+   "note": "C4",
+   "midi": 60,
+   "instrument": "marimba",
+   "volume": null,
+   "color": "red",
+   "shape": "round",
+   "azimuth_deg": -18.41,
+   "elevation_deg": -6.43,
+   "distance_cm": null
+  },
+  {
+   "t": 8.233,
+   "note": "A4",
+   "midi": 69,
+   "instrument": "piano",
+   "volume": null,
+   "color": "blue",
+   "shape": "square",
+   "azimuth_deg": 2.56,
+   "elevation_deg": -8.76,
+   "distance_cm": null
+  },
+  {
+   "t": 9.467,
+   "note": "F4",
+   "midi": 65,
+   "instrument": "flute",
+   "volume": null,
+   "color": "green",
+   "shape": "cylinder",
+   "azimuth_deg": 20.59,
+   "elevation_deg": -5.5,
+   "distance_cm": null
+  },
+  {
+   "t": 10.7,
+   "note": "E4",
+   "midi": 64,
+   "instrument": "marimba",
+   "volume": null,
+   "color": "yellow",
+   "shape": "round",
+   "azimuth_deg": -11.25,
+   "elevation_deg": 6.69,
+   "distance_cm": null
+  },
+  {
+   "t": 11.867,
+   "note": "B4",
+   "midi": 71,
+   "instrument": "flute",
+   "volume": null,
+   "color": "purple",
+   "shape": "cylinder",
+   "azimuth_deg": 11.25,
+   "elevation_deg": 8.67,
+   "distance_cm": null
+  },
+  {
+   "t": 13.067,
+   "note": "D4",
+   "midi": 62,
+   "instrument": "piano",
+   "volume": null,
+   "color": "orange",
+   "shape": "square",
+   "azimuth_deg": 25.6,
+   "elevation_deg": 4.91,
+   "distance_cm": null
+  },
+  {
+   "t": 14.3,
+   "note": "C4",
+   "midi": 60,
+   "instrument": "marimba",
+   "volume": null,
+   "color": "red",
+   "shape": "round",
+   "azimuth_deg": -18.21,
+   "elevation_deg": -6.86,
+   "distance_cm": null
+  },
+  {
+   "t": 15.433,
+   "note": "A4",
+   "midi": 69,
+   "instrument": "piano",
+   "volume": null,
+   "color": "blue",
+   "shape": "square",
+   "azimuth_deg": 2.51,
+   "elevation_deg": -9.74,
+   "distance_cm": null
+  },
+  {
+   "t": 16.667,
+   "note": "F4",
+   "midi": 65,
+   "instrument": "flute",
+   "volume": null,
+   "color": "green",
+   "shape": "cylinder",
+   "azimuth_deg": 20.35,
+   "elevation_deg": -5.09,
+   "distance_cm": null
+  },
+  {
+   "t": 17.9,
+   "note": "E4",
+   "midi": 64,
+   "instrument": "marimba",
+   "volume": null,
+   "color": "yellow",
+   "shape": "round",
+   "azimuth_deg": -11.46,
+   "elevation_deg": 7.62,
+   "distance_cm": null
+  },
+  {
+   "t": 19.067,
+   "note": "B4",
+   "midi": 71,
+   "instrument": "flute",
+   "volume": null,
+   "color": "purple",
+   "shape": "cylinder",
+   "azimuth_deg": 11.35,
+   "elevation_deg": 8.29,
+   "distance_cm": null
+  },
+  {
+   "t": 20.267,
+   "note": "D4",
+   "midi": 62,
+   "instrument": "piano",
+   "volume": null,
+   "color": "orange",
+   "shape": "square",
+   "azimuth_deg": 25.82,
+   "elevation_deg": 3.93,
+   "distance_cm": null
+  },
+  {
+   "t": 21.5,
+   "note": "C4",
+   "midi": 60,
+   "instrument": "marimba",
+   "volume": null,
+   "color": "red",
+   "shape": "round",
+   "azimuth_deg": -18.04,
+   "elevation_deg": -6.47,
+   "distance_cm": null
+  },
+  {
+   "t": 22.667,
+   "note": "A4",
+   "midi": 69,
+   "instrument": "piano",
+   "volume": null,
+   "color": "blue",
+   "shape": "square",
+   "azimuth_deg": 2.4,
+   "elevation_deg": -8.74,
+   "distance_cm": null
+  },
+  {
+   "t": 23.867,
+   "note": "F4",
+   "midi": 65,
+   "instrument": "flute",
+   "volume": null,
+   "color": "green",
+   "shape": "cylinder",
+   "azimuth_deg": 20.11,
+   "elevation_deg": -5.43,
+   "distance_cm": null
+  },
+  {
+   "t": 25.1,
+   "note": "E4",
+   "midi": 64,
+   "instrument": "marimba",
+   "volume": null,
+   "color": "yellow",
+   "shape": "round",
+   "azimuth_deg": -11.59,
+   "elevation_deg": 6.65,
+   "distance_cm": null
+  },
+  {
+   "t": 26.267,
+   "note": "B4",
+   "midi": 71,
+   "instrument": "flute",
+   "volume": null,
+   "color": "purple",
+   "shape": "cylinder",
+   "azimuth_deg": 11.46,
+   "elevation_deg": 8.61,
+   "distance_cm": null
+  },
+  {
+   "t": 27.467,
+   "note": "D4",
+   "midi": 62,
+   "instrument": "piano",
+   "volume": null,
+   "color": "orange",
+   "shape": "square",
+   "azimuth_deg": 26.03,
+   "elevation_deg": 4.94,
+   "distance_cm": null
+  },
+  {
+   "t": 28.7,
+   "note": "C4",
+   "midi": 60,
+   "instrument": "marimba",
+   "volume": null,
+   "color": "red",
+   "shape": "round",
+   "azimuth_deg": -17.91,
+   "elevation_deg": -6.84,
+   "distance_cm": null
+  }
+ ]
+}

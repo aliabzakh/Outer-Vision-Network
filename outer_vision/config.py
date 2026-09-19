@@ -106,6 +106,15 @@ DEFAULTS = {
         "voice_id": "21m00Tcm4TlvDq8ikWAM",
         "tts_model": "eleven_flash_v2_5",
     },
+    "song": {
+        # Every played phrase is saved as a song file (outer_vision/song.py) for the Solana marketplace.
+        "dir": "songs",
+        "idle_s": 8.0,                 # no note for this long ends the song
+        "min_notes": 4,                # shorter phrases aren't saved
+        "fov_deg": [66.0, 41.0],       # world camera field of view (Camera Module 3), for bearings to objects
+        "quant_deg": 3.0,              # bearing bins for the layout fingerprint (absorbs tracker jitter)
+        "quant_cm": 10.0,              # distance bins (only once depth is calibrated)
+    },
     "gaze_udp_port": 5005,
     "events": {"host": "127.0.0.1", "port": 5006},
     "calib_marker": {"dictionary": "DICT_4X4_50"},
