@@ -175,7 +175,7 @@
   "omni": {
     "base_url": "https://yibuapi.com/v1",
     "model": "qwen3.5-omni-flash",
-    "voice": "Cherry",
+    "voice": "Serena",
     "speak_with": "omni",
     "history_turns": 6,
     "timeout_s": 10.0

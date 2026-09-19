@@ -11,6 +11,8 @@ import os
 import urllib.error
 import urllib.request
 
+import numpy as np
+
 API = "https://api.elevenlabs.io/v1"
 SR = 24000
 
@@ -47,6 +49,12 @@ class Eleven:
         return self._post(f"/text-to-speech/{self.voice_id}", {"text": text, "model_id": self.tts_model})
 
     def sfx(self, prompt: str, seconds: float, influence: float = 0.7) -> bytes:
-        """Sound effect as PCM16 24 kHz."""
-        return self._post("/sound-generation", {"text": prompt, "duration_seconds": seconds,
-                                                "prompt_influence": influence})
+        """Sound effect as mono PCM16 24 kHz."""
+        b = self._post("/sound-generation", {"text": prompt, "duration_seconds": seconds,
+                                             "prompt_influence": influence})
+        x = np.frombuffer(b[:len(b) - len(b) % 4], "<i2")
+        # The sound effects API returns interleaved STEREO PCM (measured 2026-09-19: twice the samples for
+        # the requested duration). Read as mono it plays at half speed, an octave low. Mix it down.
+        if abs(len(x) / 2 / SR - seconds) < abs(len(x) / SR - seconds):
+            x = x.reshape(-1, 2).astype(np.int32).mean(1).astype(np.int16)
+        return x.tobytes()

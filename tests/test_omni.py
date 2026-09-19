@@ -28,6 +28,7 @@ class MockOmni:
 
     def __init__(self, reply, fail_text=False, fail_audio=False):
         self.reply, self.fail_text, self.fail_audio, self.requests = reply, fail_text, fail_audio, []
+        self.error_chunk = None          # like the live gateway: HTTP 200, then data: {"error": ...}
         mock = self
 
         class H(BaseHTTPRequestHandler):
@@ -45,11 +46,15 @@ class MockOmni:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
+                if mock.error_chunk:
+                    self.wfile.write(b"data: " + json.dumps({"error": mock.error_chunk}).encode() + b"\n\ndata: [DONE]\n\n")
+                    return
                 if audio:
                     pcm = (np.sin(np.arange(2400) / 10) * 8000).astype("<i2").tobytes()
                     chunks = [{"audio": {"data": base64.b64encode(pcm).decode()}}] * 3
                 else:
-                    txt = mock.reply if isinstance(mock.reply, str) else "```json\n" + json.dumps(mock.reply) + "\n```"
+                    r = mock.reply.pop(0) if isinstance(mock.reply, list) else mock.reply   # list = one per request
+                    txt = r if isinstance(r, str) else "```json\n" + json.dumps(r) + "\n```"
                     chunks = [{"content": txt[i:i + 20]} for i in range(0, len(txt), 20)]
                 for c in chunks:
                     self.wfile.write(b"data: " + json.dumps({"choices": [{"delta": c}]}).encode() + b"\n\n")
@@ -85,7 +90,7 @@ def make_assistant(reply, fail_text=False, fail_audio=False, key="test-key"):
     sel = Selector(config.load(None))
     ctx = lambda: {"jpeg": b"\xff\xd8fakejpeg", "selector": sel, "recent": [{"note": "C4", "ago_s": 1.2}],  # noqa: E731
                    "objects": {k: {**v, **music.voice_of(v["color"], v["shape"])} for k, v in OBJECTS.items()}}
-    client = omni.OmniClient(mock.url, key, "qwen3.5-omni-flash", "Cherry")
+    client = omni.OmniClient(mock.url, key, "qwen3.5-omni-flash", "Serena")
     a = omni.Assistant(CFG, music, ctx, player, published.append, log=lambda m: None, client=client, voice=voice)
     return a, mock, music, player, voice, published, sel
 
@@ -100,7 +105,8 @@ class TestAssistant(unittest.TestCase):
         parts = [p for p in decide["messages"][-1]["content"]]
         self.assertEqual([p["type"] for p in parts], ["image_url", "text", "text"])
         self.assertNotIn("input_audio", json.dumps(decide))                            # no microphone anywhere
-        self.assertEqual(json.loads(parts[1]["text"][len("COMMAND "):]), {"command": "change_instrument", "target": 4})
+        self.assertEqual(json.loads(parts[1]["text"][len("COMMAND "):]),
+                         {"command": "change_instrument", "target": 4, "reply_with_action_type": "set_instrument"})
         scene = json.loads(parts[2]["text"][len("SCENE "):])
         self.assertEqual((scene["dwell_s"], scene["recent"][0]["note"]), (0.5, "C4"))
         self.assertEqual(decide["modalities"], ["text"])
@@ -121,7 +127,17 @@ class TestAssistant(unittest.TestCase):
         self.assertAlmostEqual(sel.p["dwell_s"], 0.38)                                # offline default: x0.75
         self.assertEqual(pub[0]["source"], "fallback")
         self.assertEqual(voice.said, ["A bit faster now."])                          # not OMNI's voice for our line
-        self.assertEqual(len(mock.requests), 1)
+        self.assertEqual(len(mock.requests), 2)                                       # one retry, no speech call
+        self.assertIn("faster means fewer seconds", mock.requests[1]["messages"][-1]["content"])
+
+    def test_retry_with_the_reason_fixes_a_bad_reply(self):
+        bad = {"say": "Twinkle!", "actions": [{"type": "start_lesson", "title": "Twinkle", "notes": ["C4", "G4", "A4", "G4"]}]}
+        good = {"say": "Hot Cross Buns!", "actions": [{"type": "start_lesson", "title": "Hot Cross Buns",
+                                                      "notes": ["A4", "F4", "C4", "A4", "F4", "C4"]}]}
+        a, mock, music, player, voice, pub, _ = make_assistant([bad, good])
+        a.handle({"command": "teach"})
+        self.assertIn("['G4']", mock.requests[1]["messages"][-1]["content"])          # told exactly what was wrong
+        self.assertEqual((pub[0]["source"], music.lesson["title"]), ("omni", "Hot Cross Buns"))
 
     def test_omni_down_still_changes_the_note(self):
         a, mock, music, player, voice, pub, _ = make_assistant({}, fail_text=True)
@@ -134,6 +150,14 @@ class TestAssistant(unittest.TestCase):
         a.handle({"command": "teach"})
         self.assertEqual(mock.requests, [])
         self.assertIsNotNone(music.lesson)
+
+    def test_error_inside_a_200_stream_falls_back(self):
+        a, mock, music, player, voice, pub, _ = make_assistant({})
+        mock.error_chunk = {"message": "<400> InternalError.Algo.InvalidParameter: Voice 'Cherry' is not supported."}
+        a.handle({"command": "change_instrument", "target": 1})
+        self.assertEqual(pub[0]["source"], "fallback")
+        self.assertEqual(music.voice_of("red", "round")["instrument"], "flute")      # default: next instrument
+        self.assertEqual(voice.said, ["That one plays flute now."])
 
     def test_voice_failure_falls_back_to_voice_say(self):
         reply = {"say": "Hello there", "actions": [{"type": "set_dwell", "seconds": 0.8}]}
@@ -177,8 +201,11 @@ class TestMusic(unittest.TestCase):
         self.assertEqual(action["title"], "Hot Cross Buns")
 
     def test_parse_reply_and_midi(self):
-        r = omni.parse_reply('Sure!\n```json\n{"say": "hi", "actions": {"oops": 1}}\n```')
+        r = omni.parse_reply('Sure!\n```json\n{"say": "hi", "actions": "oops"}\n```')
         self.assertEqual((r["say"], r["actions"], r["tone"]), ("hi", [], "calm"))
+        # seen from the live model: one action as an object, typed with the command name
+        r = omni.parse_reply('{"say": "ok", "actions": {"type": "change_instrument", "target": 4, "instrument": "bell"}}')
+        self.assertEqual(r["actions"], [{"type": "set_instrument", "target": 4, "instrument": "bell"}])
         self.assertEqual((midi("C4"), midi("A4"), midi("F#4"), midi("Bb3"), midi("H2")), (60, 69, 66, 58, None))
 
 

@@ -82,9 +82,10 @@ DEFAULTS = {
         # OpenAI-compatible endpoint serving an OMNI model. Key from env OMNI_API_KEY, never from this file.
         "base_url": "https://yibuapi.com/v1",
         "model": "qwen3.5-omni-flash",
-        "voice": "Cherry",
+        "voice": "Serena",
         "speak_with": "omni",          # "omni" (model's own voice) | "fallback" (ElevenLabs/local) | "none"
         "timeout_s": 10.0,             # after this the command falls back to the offline default
+        "retries": 1,                  # a reply that doesn't fit the command is sent back once with the reason
         "history_turns": 6,
     },
     "blink": {

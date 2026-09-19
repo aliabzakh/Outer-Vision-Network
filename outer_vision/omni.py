@@ -39,13 +39,15 @@ Commands and the ONE action each allows:
 - change_instrument (target id): {"type":"set_instrument","target":<id>,"instrument":<one of AVAILABLE_INSTRUMENTS>}
   Pick something different from its current instrument that suits the object's look and what else is on the table.
 - change_note (target id): {"type":"set_note","target":<id>,"note":"<scientific pitch like C4 or F#4>"}
-  Pick a different note that fits with the other notes on the table (fill a gap in the scale, complete a chord, or
-  add a note a song they tried needs).
+  Pick a different note that stays in the same key as notes_on_table (usually C major: no sharps or flats)
+  and fills a gap, completes a chord, or adds a note a well-known song needs.
 - faster / slower: {"type":"set_dwell","seconds":<0.2-1.5>}
   Must be shorter (faster) or longer (slower) than dwell_s. Change it by 15-40%: more if recent notes came
   quickly and confidently (faster) or they hit neighbouring objects by mistake (slower).
 - teach: {"type":"start_lesson","title":"<song>","notes":["C4","C4","G4",...]}
-  A well-known song using ONLY notes currently on the table; simplify it if needed (and say so). 6-16 notes.
+  A REAL, well-known song (nursery rhyme, folk tune or famous classical theme; never an invented melody) whose
+  opening can be played with ONLY the notes in notes_on_table. 6-16 notes. Transpose or simplify it if needed
+  and say which song it is.
 
 Reply with ONLY one JSON object, no prose, no code fences:
 {"say": "<spoken reply: warm, at most 2 short sentences, say what you changed and why; never mention ids or JSON>",
@@ -95,6 +97,8 @@ class OmniClient:
                     chunk = json.loads(data)
                 except ValueError:
                     continue
+                if chunk.get("error"):         # the gateway reports some errors inside a 200 stream
+                    raise OmniError(f"stream error: {str(chunk['error'].get('message', chunk['error']))[:300]}")
                 for ch in chunk.get("choices") or []:
                     delta = ch.get("delta") or {}
                     if delta.get("content"):
@@ -116,35 +120,76 @@ def parse_reply(text: str) -> dict:
     r.setdefault("actions", [])
     r.setdefault("say", "")
     r.setdefault("tone", "calm")
+    if isinstance(r["actions"], dict):          # seen live: one action sent as an object, not a list
+        r["actions"] = [r["actions"]]
     if not isinstance(r["actions"], list):
         r["actions"] = []
+    for a in r["actions"]:                      # seen live: the command name used as the action type
+        if isinstance(a, dict) and a.get("type") in ALLOWED:
+            a["type"] = ALLOWED[a["type"]]
     return r
 
 
-def fits(command: dict, action: dict, objects: dict, music, dwell_s: float) -> bool:
-    """Does OMNI's action do what the blink asked, and actually change something?"""
+def problem(command: dict, action, objects: dict, music, dwell_s: float):
+    """Why OMNI's action doesn't do what the blink asked (a sentence OMNI can act on), or None if it fits."""
     kind = command.get("command")
-    if not isinstance(action, dict) or action.get("type") != ALLOWED.get(kind):
-        return False
+    want = ALLOWED.get(kind)
+    if not isinstance(action, dict) or action.get("type") != want:
+        return f'the command is {kind}, so the action must have "type": "{want}".'
     if kind in ("change_instrument", "change_note"):
         try:
             if int(action.get("target")) != command.get("target"):
-                return False
+                return f"the target must be object {command.get('target')}."
         except (TypeError, ValueError):
-            return False
+            return f"the target must be object {command.get('target')}."
         o = objects.get(command["target"])
         if o is None:
-            return False
+            return "that object is no longer on the table."
         cur = music.voice_of(o["color"], o["shape"])
         field = "instrument" if kind == "change_instrument" else "note"
-        return str(action.get(field, "")).lower() != str(cur[field]).lower()
+        if str(action.get(field, "")).lower() == str(cur[field]).lower():
+            return f"it already plays {cur[field]}; pick a different {field}."
+        return None
     if kind in ("faster", "slower"):
         try:
             s = float(action.get("seconds"))
         except (TypeError, ValueError):
-            return False
-        return s < dwell_s if kind == "faster" else s > dwell_s
-    return True
+            return '"seconds" must be a number.'
+        if (s >= dwell_s) if kind == "faster" else (s <= dwell_s):
+            return f"dwell_s is {dwell_s}; faster means fewer seconds, slower means more."
+        return None
+    if kind == "teach":
+        from .music import midi
+        playable = {music.voice_of(o["color"], o["shape"])["midi"] for o in objects.values()}
+        notes = [str(n) for n in action.get("notes") or []]
+        missing = sorted({n for n in notes if midi(n) not in playable})
+        if len(notes) < 4 or missing:
+            return (f"these notes are not on the table: {missing}. Use only {sorted_notes(objects, music)}; "
+                    "transpose or pick another well-known song.") if missing else "use at least 6 notes."
+    return None
+
+
+def fits(command, action, objects, music, dwell_s) -> bool:
+    return problem(command, action, objects, music, dwell_s) is None
+
+
+def sorted_notes(objects: dict, music) -> list:
+    from .music import midi
+    return sorted({music.voice_of(o["color"], o["shape"])["note"] for o in objects.values()}, key=lambda n: midi(n) or 0)
+
+
+def build_scene(objects: dict, dwell_s: float, music, recent: list) -> dict:
+    """What OMNI gets besides the image. objects: id -> object dict with note/instrument."""
+    notes = sorted_notes(objects, music)
+    return {
+        "objects": [{k: v for k, v in o.items() if k in ("id", "color", "shape", "note", "instrument", "distance_cm")}
+                    for o in objects.values()],
+        "notes_on_table": notes,
+        "dwell_s": dwell_s,
+        "available_instruments": music.available,
+        "lesson": music.state()["lesson"],
+        "recent": recent,
+    }
 
 
 class Assistant:
@@ -194,21 +239,14 @@ class Assistant:
         ctx = self.context()
         objects, sel = ctx["objects"], ctx.get("selector")
         dwell_s = sel.p["dwell_s"] if sel is not None else 0.5
-        scene = {
-            "objects": [{k: v for k, v in o.items() if k in ("id", "color", "shape", "note", "instrument", "distance_cm")}
-                        for o in objects.values()],
-            "dwell_s": dwell_s,
-            "available_instruments": self.music.available,
-            "lesson": self.music.state()["lesson"],
-            "recent": ctx.get("recent", []),
-        }
+        scene = build_scene(objects, dwell_s, self.music, ctx.get("recent", []))
         messages = [{"role": "system", "content": DECIDE_PROMPT.replace(
             "AVAILABLE_INSTRUMENTS", "/".join(self.music.available))}]
         for cmd, said in self.history[-self.cfg["history_turns"]:]:
             messages += [{"role": "user", "content": "COMMAND " + json.dumps(cmd)}, {"role": "assistant", "content": said}]
         messages.append({"role": "user", "content": [
             {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(ctx["jpeg"]).decode()}},
-            {"type": "text", "text": "COMMAND " + json.dumps(command)},
+            {"type": "text", "text": "COMMAND " + json.dumps({**command, "reply_with_action_type": ALLOWED.get(command.get("command"))})},
             {"type": "text", "text": "SCENE " + json.dumps(scene)},
         ]})
 
@@ -216,8 +254,19 @@ class Assistant:
         try:
             if not self.client.key:
                 raise OmniError("no OMNI_API_KEY")
-            reply = parse_reply("".join(d for k, d in self.client.stream(messages) if k == "text"))
-            actions = [a for a in reply["actions"] if fits(command, a, objects, self.music, dwell_s)][:1]
+            for attempt in range(1 + self.cfg["retries"]):
+                text = "".join(d for k, d in self.client.stream(messages) if k == "text")
+                reply = parse_reply(text)
+                why = [problem(command, a, objects, self.music, dwell_s) for a in reply["actions"]] or ["no action given."]
+                actions = [a for a, w in zip(reply["actions"], why) if w is None][:1]
+                if actions:
+                    break
+                # explain the action that was closest (right type) rather than the first one
+                why = [w for a, w in zip(reply["actions"], why) if isinstance(a, dict)
+                       and a.get("type") == ALLOWED.get(command.get("command"))] or why
+                self.log(f"[omni] reply doesn't fit ({why[0]})" + ("; asking again" if attempt < self.cfg["retries"] else ""))
+                messages += [{"role": "assistant", "content": text},
+                             {"role": "user", "content": f"That doesn't work: {why[0]} Reply again with only the JSON."}]
         except OmniError as e:
             self.log(f"[omni] {e}")
         t_decided = time.monotonic()
