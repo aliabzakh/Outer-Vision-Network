@@ -63,8 +63,26 @@ def same_subnet(a, b, bits):
     return (n(a) & mask) == (n(b) & mask)
 
 
+ARP_TIMEOUT_S = 1200        # macOS default; the "Expire" column counts down from it
+
+
+def arp_age(ip):
+    """Roughly how long ago this ARP entry was last confirmed, in seconds, or None if not cached.
+
+    An entry survives 20 minutes after the host stops answering, so a cached MAC is NOT proof that
+    anything is there now. macOS will not re-ARP while an entry is still valid, so age is the only
+    signal available without root: a fresh entry means the host answered recently, an old one means
+    it answered once and may be long gone.
+    """
+    for line in sh("netstat -rn -f inet").splitlines():
+        parts = line.split()
+        if parts and parts[0] == ip and parts[-1].isdigit():
+            return max(0, ARP_TIMEOUT_S - int(parts[-1]))
+    return None
+
+
 def arp_candidates():
-    """Anything in the ARP table with a Raspberry Pi MAC. -> [(ip, mac, iface)]"""
+    """Anything in the ARP table with a Raspberry Pi MAC. -> [(ip, mac, iface, age_s)]"""
     found = []
     for line in sh("arp -a").splitlines():
         m = re.search(r"\((\d+\.\d+\.\d+\.\d+)\) at ([0-9a-f:]+) on (\w+)", line, re.I)
@@ -73,7 +91,7 @@ def arp_candidates():
         ip, mac, iface = m.group(1), m.group(2).lower(), m.group(3)
         mac = ":".join(p.zfill(2) for p in mac.split(":"))
         if mac.startswith(PI_OUI):
-            found.append((ip, mac, iface))
+            found.append((ip, mac, iface, arp_age(ip)))
     return found
 
 
@@ -126,8 +144,10 @@ def scan(cfg):
     print()
 
     seen, cands = set(), []
-    for ip, mac, iface in arp_candidates():
-        cands.append((ip, f"a Raspberry Pi MAC ({mac}) seen on {iface}"))
+    for ip, mac, iface, age in arp_candidates():
+        when = "just now" if age is not None and age < 60 else (
+            f"{age // 60} min ago" if age is not None else "at some point")
+        cands.append((ip, f"a Raspberry Pi MAC ({mac}) answered on {iface} {when}"))
         seen.add(ip)
     for ip, name in mdns_candidates():
         if ip not in seen:
@@ -184,7 +204,17 @@ def report(ifaces, results, cfg):
     if pi_seen:
         r = pi_seen[0]
         ip = r["ip"]
-        print(f"A Raspberry Pi IS on the cable ({ip}), but it is not answering anything.")
+        stale = "min ago" in r["why"] or "at some point" in r["why"]
+        if stale:
+            print(f"A Raspberry Pi answered at {ip} earlier, but nothing is there NOW.")
+            print("    That address came out of the ARP cache, which keeps a MAC for 20 minutes after the")
+            print("    host stops replying -- so it is a ghost, not proof the board is up. It will vanish")
+            print("    on its own. Treat this as 'the board is not running'.")
+        else:
+            print(f"A Raspberry Pi is answering at layer 2 on {ip}, but not at IP level.")
+        print()
+        print("    CHECK THE BOARD'S LIGHTS FIRST. Green blinking = it is running; red only = it has")
+        print("    power but never booted, and no amount of network debugging will help.")
         print()
         on_subnet = [(n, i, b) for n, i, b in ifaces if same_subnet(i, ip, b)]
         if not on_subnet:
@@ -200,11 +230,11 @@ def report(ifaces, results, cfg):
                 print("    A 169.254.x.x address means the board found no DHCP server and picked its own.")
                 print("    That is normal on a direct cable. Giving the Mac a 169.254 address is the fix.")
             print()
-        print("    REASON 2 -- the board booted far enough to answer once, then stopped. The Ethernet")
-        print("    PHY keeps the link up even when the board itself is wedged, so 'cable is plugged in'")
-        print("    is not evidence that it is running. Both repos record this, and it is almost always")
-        print("    POWER: the Pi 5 with two cameras wants a real 5 V / 5 A (27 W) USB-C supply. A laptop")
-        print("    port or a dock is not enough. Repower it from a proper charger and try again.")
+        print("    REASON 2 -- the board is not booting. The Ethernet PHY holds the link up on its own,")
+        print("    so an 'active' link proves only that the PHY has power, not that the board runs.")
+        print("    Almost always POWER: the Pi 5 with two cameras needs a real 5 V / 5 A (27 W) supply,")
+        print("    and most USB-C chargers only offer 5 V / 3 A. Not the laptop, not the dock. If it")
+        print("    still comes up red with a good supply, suspect the SD card.")
         print()
         print("    Watch for it coming back:   .venv/bin/python tools/find_board.py --watch")
         return 1
