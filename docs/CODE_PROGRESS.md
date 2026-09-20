@@ -131,6 +131,6 @@ Double blink = cancel, menu times out after 8 s, no notes while it's open. Keybo
 |---|---|
 | `run.py` | Main loop (sources, gaze + blinks, detection, dwell, menu, Maestro, events, overlay, recording) |
 | `outer_vision/` | `detector`, `shape_net`, `tracker`, `gaze_model`, `selector`, `blink`, `menu`, `music`, `omni`, `voice`, `eleven`, `audio`, `pitch`, `io`, `overlay`, `synthetic`, `telemetry`, `config` |
-| `tools/` | `qnx_bridge`, `synth`, `gen_audio`, `omni_check`, `omni_label`, `collect`, `train_shape`, `tune_colors`, `pi_camera_server`, `listen`, `send_gaze`, `make_marker` |
+| `tools/` | `find_board`, `qnx_bridge`, `synth`, `gen_audio`, `omni_check`, `omni_label`, `collect`, `train_shape`, `tune_colors`, `pi_camera_server`, `listen`, `send_gaze`, `make_marker` |
 | `deploy/` | Raspberry Pi **OS** only (a spare board as a plain world camera): `deploy_pi.sh`, `setup_pi.sh`. The QNX board is built from the eye repo's `pi/` |
 | `README.md` · `INTERFACE.md` · `COMPROMISES.md` · `SPEC.md` | Usage · message formats · known shortcuts · decisions |

@@ -130,6 +130,7 @@ ssh qnxuser@<board> 'sh ~/gazecomp/scripts/start_streamers.sh'    # eye :8080, s
 ```
 Then, on the laptop:
 ```bash
+.venv/bin/python tools/find_board.py             # where is the board, and why isn't it answering?
 .venv/bin/python tools/qnx_bridge.py --probe      # is the board up? live gaze + eyelid openness
 .venv/bin/python run.py --source qnx --gaze qnx   # scene camera + gaze, in one process
 ```
@@ -207,7 +208,8 @@ outer_vision/telemetry.py  optional Sentry traces/logs
 outer_vision/io.py         sources (webcam, video, synthetic, qnx, picam, MJPEG URL), gaze in (qnx poll or
                            UDP) + blinks, UDP out, MJPEG, recorder, ArUco
 deploy/                    Raspberry Pi OS setup: deploy_pi.sh (Mac → Pi), setup_pi.sh (on the Pi)
-tools/                     qnx_bridge (QNX board → UDP gaze, --probe, --zero), synth, gen_audio, omni_check,
+tools/                     find_board (locate the QNX board and say why it isn't answering),
+                           qnx_bridge (QNX board → UDP gaze, --probe, --zero), synth, gen_audio, omni_check,
                            omni_label, collect, train_shape, tune_colors, pi_camera_server, listen,
                            send_gaze, make_marker
 ```

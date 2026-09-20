@@ -185,37 +185,80 @@ Details → TCP/IP → Configure IPv4: Manually**
 
 ### Find the board's address
 
-⚠️ **The two repos disagree about this.** This repo defaults to `192.168.2.2`; the eye repo's
-`start_streamers.sh` aliases `192.168.127.94`. Settle it before the demo — check what the board actually
-answers on:
+**Don't guess, and don't just ping `192.168.2.2`.** The board's boot config takes its IP from **DHCP**,
+and on a direct cable there is no DHCP server — so it gives up and assigns itself a **link-local
+`169.254.x.x`** address instead. It is then on a different subnet from your Mac, and every ping times out
+even though the board is sitting right there on the end of the cable.
+
+One command finds it wherever it landed, and tells you what to do about it:
 
 ```bash
-ping -c 3 192.168.2.2
+.venv/bin/python tools/find_board.py
 ```
 
-```bash
-ping -c 3 192.168.127.94
-```
+It checks the ARP table for a Raspberry Pi MAC address, asks mDNS, and tries the addresses both repos
+hard-code (`192.168.2.2` here, `192.168.127.94` in the eye repo). Then it says which of four things is
+true and prints the fix.
 
-Confirm the ports are open:
-
-```bash
-nc -z -G 3 192.168.2.2 8080 && echo "eye camera is listening"
-```
-
-If neither address answers, plug in a monitor or serial console and check the board's IP there.
-
-Once you know it, set it once so you never have to type it again — edit `config.json`:
+**If it found the cameras**, it prints the exact `config.json` line to paste:
 
 ```json
-"qnx": { "host": "192.168.2.2", ... }
+"qnx": { "host": "169.254.96.94", ... }
 ```
+
+**If it found a Raspberry Pi but nothing answers**, read the two reasons it prints. They are the two that
+actually happen:
+
+- **Wrong subnet.** The board picked a `169.254.x.x` address and your Mac is on `192.168.2.1/24`, so the
+  board physically cannot reply to you. Give the Mac an address on the board's subnet too (temporary —
+  it disappears on reboot, and it does not disturb your existing `192.168.2.1`):
+
+  ```bash
+  sudo ifconfig en7 alias 169.254.96.1 255.255.0.0
+  ```
+
+  `find_board.py` prints this line with the right interface and numbers already filled in.
+
+- **The board is wedged.** An Ethernet link that shows `status: active` only proves the *PHY chip* has
+  power. It stays up when the board itself has hung or browned out, so a live link is **not** evidence
+  that the board is running. This is nearly always power — see below.
+
+**If it found nothing at all**, the cable, the adapter, or the board's power is the problem.
+
+### ⚠️ Power is the most common cause
+
+The Pi 5 with two cameras needs a real **5 V / 5 A (27 W)** USB-C supply. A laptop USB-C port, a dock, or
+a phone charger is not enough. Under-powered, it will often boot far enough to bring up Ethernet and then
+stop responding — which looks exactly like a network problem and isn't one. Both repos record the board
+dropping off the network with normal temperature and free memory just beforehand.
+
+Power it from a proper charger, then watch for it to come back:
+
+```bash
+.venv/bin/python tools/find_board.py --watch
+```
+
+### Checking the Mac's side
+
+Your Mac needs an address on the cable. Check what it has:
+
+```bash
+ifconfig en7 | grep -E "status|inet "
+```
+
+`status: active` with an `inet` line means the adapter is up and addressed. To set it by hand:
+**System Settings → Network → your USB/Thunderbolt LAN adapter → Details → TCP/IP → Configure IPv4:
+Manually**, IP `192.168.2.1`, mask `255.255.255.0`, no router.
 
 ---
 
 ## 4. The board: build and start the cameras
 
 All of this is the **eye repo's** code, run on the board. Commands are from its `pi/README.md`.
+
+> **You need [§3](#3-the-board-network) working first.** `scp` and `ssh` below cannot work until
+> `tools/find_board.py` can reach the board. Replace `192.168.2.2` in every command with whatever
+> address it reported.
 
 From the laptop, in a clone of the **eye repo**, copy the board code over:
 
@@ -465,6 +508,10 @@ Replay it through the current code as many times as you like:
 ```
 
 ```bash
+.venv/bin/python tools/find_board.py
+```
+
+```bash
 ssh qnxuser@192.168.2.2 'sh ~/gazecomp/scripts/start_streamers.sh'
 ```
 
@@ -686,6 +733,9 @@ The historical debugging log for that path is in [PI_DEBUGGING.md](PI_DEBUGGING.
 
 | Symptom | Most likely cause | Do this |
 |---|---|---|
+| Can't ping the board at all | it is probably on a link-local `169.254.x.x` address, not `192.168.2.2` | `tools/find_board.py` — it finds it and prints the fix |
+| Ping times out but the Ethernet link is "active" | an active link only means the PHY has power; the board itself can be wedged | repower from a 5 V / 5 A supply, then `tools/find_board.py --watch` |
+| Board answers nothing, and no SSH either | under-powered, or it never finished booting | proper 27 W supply; serial console if it stays dead |
 | `board:DOWN` in the HUD | streamers aren't running (they die on reboot) | `ssh qnxuser@<board> 'sh ~/gazecomp/scripts/start_streamers.sh'` |
 | `camera_open` fails with error 16 | an old process still holds the camera | `slay -f -9 camera_streamer`, then start again |
 | `eyes:0` / `n=0` | camera can't see the eyes, or it's too dark | reposition the eye camera; more light |
