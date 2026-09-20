@@ -21,12 +21,13 @@ def midi(note: str):
 
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-SCALE_MIDI = [60, 62, 64, 65, 67, 69, 71, 72]           # C major, C4..C5 (the default table)
-SONGS = {   # fallback lessons when OMNI is unreachable
-    "Twinkle Twinkle": ["C4", "C4", "G4", "G4", "A4", "A4", "G4", "F4", "F4", "E4", "E4", "D4", "D4", "C4"],
+SCALE_MIDI = [60, 62, 64, 67, 69]                       # C major pentatonic, C4 D4 E4 G4 A4 (the table)
+SONGS = {   # fallback lessons when OMNI is unreachable. Every note must be in SCALE_MIDI, or the song
+            # can't be played on the default table: no F and no B, which rules out Twinkle and Ode to Joy.
     "Mary Had a Little Lamb": ["E4", "D4", "C4", "D4", "E4", "E4", "E4", "D4", "D4", "D4", "E4", "G4", "G4"],
-    "Ode to Joy": ["E4", "E4", "F4", "G4", "G4", "F4", "E4", "D4", "C4", "C4", "D4", "E4", "E4", "D4", "D4"],
     "Hot Cross Buns": ["E4", "D4", "C4", "E4", "D4", "C4", "C4", "C4", "D4", "D4", "E4", "D4", "C4"],
+    "Old MacDonald": ["C4", "C4", "C4", "G4", "A4", "A4", "G4", "E4", "E4", "D4", "D4", "C4"],
+    "Jingle Bells": ["E4", "E4", "E4", "E4", "E4", "E4", "E4", "G4", "C4", "D4", "E4"],
 }
 
 

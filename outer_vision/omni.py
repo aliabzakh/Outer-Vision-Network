@@ -9,8 +9,11 @@ Each request:
   2. ACT: only actions that fit the command are applied, and Music.apply() validates them. If OMNI is
      unreachable or replies with nothing usable, Music.default_action() runs instead, so a command
      always does something.
-  3. SPEAK (streaming): OMNI voices `say` in the requested tone; audio plays as it arrives. If that
-     fails, Voice.say() (ElevenLabs, then local TTS) says it instead.
+  3. SPEAK (streaming): ElevenLabs voices `say` in the requested tone and the audio plays as it arrives,
+     cutting off the "One moment" clip. That is the same voice as the pre-generated menu prompts, so the
+     instrument has one voice throughout. `omni.speak_with` chooses: "eleven" (default), "omni" (the
+     model's own voice, one fewer round trip but a second voice) or "none". Whichever is asked for, the
+     other one and then local TTS stand behind it, so a command is never answered by silence.
 Privacy: only a downscaled frame and the scene JSON leave the device, and only when the user blinks a command.
 """
 from __future__ import annotations
@@ -38,16 +41,20 @@ and instrument, the look-to-play time (dwell_s), the lesson in progress, and the
 Commands and the ONE action each allows:
 - change_instrument (target id): {"type":"set_instrument","target":<id>,"instrument":<one of AVAILABLE_INSTRUMENTS>}
   Pick something different from its current instrument that suits the object's look and what else is on the table.
-- change_note (target id): {"type":"set_note","target":<id>,"note":"<scientific pitch like C4 or F#4>"}
-  Pick a different note that stays in the same key as notes_on_table (usually C major: no sharps or flats)
-  and fills a gap, completes a chord, or adds a note a well-known song needs.
+- change_note (target id): {"type":"set_note","target":<id>,"note":"<scientific pitch like C4 or G4>"}
+  Pick a different note from the same scale as notes_on_table and no more than an octave outside their
+  range. The default table is C major PENTATONIC (C D E G A, no F and no B, no sharps or flats), which is
+  why nothing on it can clash; stay in it unless notes_on_table shows the user has moved somewhere else.
+  Choose one that fills a gap, completes a chord, or adds a note a well-known song needs.
 - faster / slower: {"type":"set_dwell","seconds":<0.2-1.5>}
   Must be shorter (faster) or longer (slower) than dwell_s. Change it by 15-40%: more if recent notes came
   quickly and confidently (faster) or they hit neighbouring objects by mistake (slower).
 - teach: {"type":"start_lesson","title":"<song>","notes":["C4","C4","G4",...]}
   A REAL, well-known song (nursery rhyme, folk tune or famous classical theme; never an invented melody) whose
   opening can be played with ONLY the notes in notes_on_table. 6-16 notes. Transpose or simplify it if needed
-  and say which song it is.
+  and say which song it is. With a pentatonic table there is no F and no B, so tunes that need them
+  (Twinkle Twinkle, Ode to Joy) do not fit: pick one that does, such as Mary Had a Little Lamb, Hot Cross
+  Buns, Old MacDonald or Jingle Bells.
 
 Reply with ONLY one JSON object, no prose, no code fences:
 {"say": "<spoken reply: warm, at most 2 short sentences, say what you changed and why; never mention ids or JSON>",
@@ -209,6 +216,7 @@ class Assistant:
             self.log("[omni] OMNI_API_KEY is not set; commands will use the offline defaults")
         self.history = []                   # [(command, say)] so Maestro doesn't repeat itself
         self.status, self.caption = "idle", ""
+        self.spoke_with = None              # which engine actually produced the last reply's audio
         self.last_metrics = {}
         self._q = queue.Queue()
         threading.Thread(target=self._worker, daemon=True).start()
@@ -283,38 +291,66 @@ class Assistant:
                       "results": results, "source": source})
         self.publish({"type": "music", **self.music.state(), "dwell_s": sel.p["dwell_s"] if sel is not None else None})
 
-        t_first_audio = self._speak(reply["say"], reply.get("tone", "calm"), use_omni=source == "omni")
+        t_first_audio = self._speak(reply["say"], reply.get("tone", "calm"), omni_reachable=source == "omni")
         self.last_metrics = {
             "decide_ms": round((t_decided - t0) * 1000),
             "first_audio_ms": None if t_first_audio is None else round((t_first_audio - t0) * 1000),
             "source": source,
+            "voice": self.spoke_with,
         }
         self.log(f"[omni] latency {self.last_metrics}")
 
-    def _speak(self, text: str, tone: str, use_omni=True):
+    def _speak(self, text: str, tone: str, omni_reachable=True):
+        """Say `text` out loud. Returns the monotonic time the first audio reached the speaker.
+
+        Order is `omni.speak_with` first, then the other engine, then local TTS. ElevenLabs is the
+        default: one voice for the prompts and the replies, and it works even when OMNI is the thing
+        that's down, which is exactly when the user most needs to be told something.
+        """
+        self.spoke_with = None
         if not text or self.cfg["speak_with"] == "none":
             return None
         self.status = "speaking"
-        if use_omni and self.cfg["speak_with"] == "omni" and self.player is not None:
-            first = None
-            try:
-                msgs = [{"role": "system", "content": SPEAK_PROMPT.format(tone=tone)}, {"role": "user", "content": text}]
-                for kind, data in self.client.stream(msgs, audio_out=True):
-                    if kind == "audio":
-                        if first is None:
-                            first = time.monotonic()
-                            self.player.stop()          # cut "one moment" if it's still playing
-                        self.player.feed(data)
-            except OmniError as e:
-                self.log(f"[omni] voice failed ({e}); using fallback speech")
-            if first is not None:
-                while self.player.playing:
-                    time.sleep(0.05)
-                return first
+        want = self.cfg["speak_with"]
+        if want == "fallback":                 # old name for the same thing, kept so configs don't break
+            want = "eleven"
+        order = ["omni", "eleven"] if want == "omni" else ["eleven", "omni"]
+        for engine in order:
+            if engine == "eleven":
+                if self.voice is None or not getattr(self.voice, "can_speak", False):
+                    continue
+                first = self.voice.say(text, tone=tone, cut=True)
+                if first is not None:
+                    self.spoke_with = "eleven"
+                    return first
+            elif omni_reachable and self.player is not None and self.client.key:
+                first = self._speak_omni(text, tone)
+                if first is not None:
+                    self.spoke_with = "omni"
+                    return first
+        self.spoke_with = "local"
         t = time.monotonic()
-        if self.voice is not None:
-            self.voice.say(text)
-        else:
-            from .voice import local_say
-            local_say(text)
+        from .voice import local_say
+        local_say(text)
         return t
+
+    def _speak_omni(self, text: str, tone: str):
+        """The model reads its own reply back. One voice fewer to configure, but not the same voice as
+        the menu prompts, so it is no longer the default."""
+        first = None
+        try:
+            msgs = [{"role": "system", "content": SPEAK_PROMPT.format(tone=tone)}, {"role": "user", "content": text}]
+            for kind, data in self.client.stream(msgs, audio_out=True):
+                if kind == "audio":
+                    if first is None:
+                        first = time.monotonic()
+                        self.player.stop()          # cut "one moment" if it's still playing
+                    self.player.feed(data)
+        except OmniError as e:
+            self.log(f"[omni] voice failed ({e}); using the next engine")
+            if first is None:
+                return None
+        if first is not None:
+            while self.player.playing:
+                time.sleep(0.05)
+        return first

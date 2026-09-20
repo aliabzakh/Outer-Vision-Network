@@ -3,9 +3,10 @@
 
   python tools/tune_colors.py --source 0
 
-Press 1-8 to pick a colour slot, then click that object: its median HSV becomes the prototype.
+Press 1-N to pick a colour slot (N = however many colours are registered, 5 by default), then
+click that object: its median HSV becomes the prototype.
 Right half = every pixel painted with the colour it is assigned to (black = ignored).
-Keys: 1-8 slot | [ ] shrink/grow max_dist | s save | q quit
+Keys: 1-N slot | [ ] shrink/grow max_dist | s save | q quit
 """
 import argparse
 import sys

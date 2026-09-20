@@ -1,8 +1,15 @@
 # Raspberry Pi: connection and debugging log
 
+> **Superseded — kept as a record.** This log is from an attempt to run this repo's Python on a Raspberry
+> Pi OS board. The rig now runs **QNX 8.0**, the board runs only the eye team's C/C++ `camera_streamer`,
+> and `run.py` stays on the laptop and reads the board over HTTP (see README → "The rig"). Nothing below
+> applies to the QNX board; the QNX notes live in the eye repo's `pi/README.md`. What is still useful here
+> is the Ethernet setup on the Mac side and the power finding in row 4 — the QNX board has shown the same
+> symptom, so use a proper 5 V / 5 A supply.
+
 *As of 2026-09-19, ~10:30. Goal: get the code onto the Pi and verify the camera, speed and tests.*
 
-## Status: blocked on login
+## Status at the time: blocked on login
 The network works; SSH password login fails ("Permission denied"), and no SSH key is installed yet.
 
 ## Setup as found

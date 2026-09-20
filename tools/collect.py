@@ -24,7 +24,7 @@ from outer_vision.detector import Detector, crop_for  # noqa: E402
 from outer_vision.io import open_source  # noqa: E402
 from outer_vision.tracker import Tracker  # noqa: E402
 
-LABELS = ("round", "square", "cylinder", "reject", "auto")
+LABELS = ("round", "square", "cylinder", "triangle", "reject", "auto")
 
 
 def main():

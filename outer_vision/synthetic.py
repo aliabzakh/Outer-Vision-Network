@@ -12,21 +12,22 @@ import math
 import cv2
 import numpy as np
 
-# Display/scene colours, BGR. Order = rainbow = suggested scale (C D E F G A B C').
+# Display/scene colours, BGR. These must be the colours registered in config.json -> "colors", or the
+# detector won't find them. Rainbow order = the C major pentatonic scale (C D E G A).
 BGR = {
-    "red": (30, 30, 200), "orange": (20, 110, 235), "yellow": (30, 200, 220), "green": (50, 170, 50),
-    "cyan": (200, 190, 30), "blue": (200, 90, 30), "purple": (150, 50, 120), "pink": (170, 110, 235),
+    "red": (30, 30, 200), "yellow": (30, 200, 220), "green": (50, 170, 50),
+    "blue": (200, 90, 30), "purple": (150, 50, 120),
 }
-SHAPES = ("round", "square", "cylinder")
+SHAPES = ("round", "square", "cylinder", "triangle")
 
-# (color, shape, x, y, size_px) for the default demo scene.
+# (color, shape, x, y, size_px) for the default demo scene: one object per colour = all five notes,
+# and all four shapes = all four default instruments.
 DEFAULT_OBJECTS = [
-    ("red", "round", 150, 330, 46),
-    ("blue", "square", 330, 360, 48),
-    ("green", "cylinder", 500, 320, 40),
-    ("yellow", "round", 230, 170, 32),
-    ("purple", "cylinder", 430, 160, 30),
-    ("orange", "square", 560, 200, 30),
+    ("red", "round", 150, 330, 46),         # C4 marimba
+    ("blue", "square", 330, 360, 48),       # G4 piano
+    ("green", "cylinder", 500, 320, 40),    # E4 flute
+    ("yellow", "triangle", 230, 170, 40),   # D4 bell
+    ("purple", "round", 430, 165, 32),      # A4 marimba
 ]
 
 
@@ -79,6 +80,18 @@ def draw_object(img, mask, color, shape, x, y, size, pitch=math.radians(50), yaw
         hull = cv2.convexHull(np.concatenate([bottom, top]).astype(np.float32))[:, 0]
         poly(hull, _shade(c, 0.8))       # body silhouette
         poly(top, _shade(c, 1.15))       # lit top face
+    elif shape == "triangle":
+        # A triangular prism standing on its base, triangular faces toward and away from the camera
+        # (a foam wedge, a folded card, a Toblerone on end). The silhouette is what matters: a triangle.
+        # Taller than it is wide: a triangle covers only ~0.3 of its bounding box against ~0.79 for a ball,
+        # so a squat one falls under the detector's min_area_frac before any other shape does.
+        a, hgt, depth = s / 2, s * 1.25, s * 0.25
+        face = np.array([[-a, 0.0, 0.0], [a, 0.0, 0.0], [0.0, 0.0, hgt]])
+        front, back = face + [0, -depth / 2, 0], face + [0, depth / 2, 0]
+        pf, pb = _proj(front, pitch), _proj(back, pitch)
+        hull = cv2.convexHull(np.concatenate([pf, pb]).astype(np.float32))[:, 0]
+        poly(hull, _shade(c, 0.75))      # body silhouette (the sliver of the far face and the top edge)
+        poly(pf, c)                      # lit face pointing at the camera
     elif shape == "square":
         a = s / 2
         base = np.array([[-a, -a], [a, -a], [a, a], [-a, a]])
@@ -154,7 +167,7 @@ def render(frame_idx: int, objects=DEFAULT_OBJECTS, w=640, h=480, seed=0, head_m
 def object_center(obj, pitch_deg=50):
     """Where an object's silhouette centre roughly lands (for fake gaze / tests)."""
     color, shape, x, y, s = obj
-    up = {"round": 0.5, "square": 0.5, "cylinder": 0.8}[shape] * s * math.cos(math.radians(pitch_deg))
+    up = {"round": 0.5, "square": 0.5, "cylinder": 0.8, "triangle": 0.5}[shape] * s * math.cos(math.radians(pitch_deg))
     return x, y - up
 
 

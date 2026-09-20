@@ -5,12 +5,13 @@ Examples:
   python run.py --source synthetic --gaze synthetic                  # no hardware at all
   python run.py --source 0 --gaze mouse                              # webcam, mouse = gaze, keys 1/2/3/x = blinks
   python run.py --source recordings/X/world.mp4 --gaze replay:recordings/X/log.jsonl
-  python run.py --source http://192.168.2.2:8081/stream --gaze udp --stream 8080      # Pi camera -> laptop
-  python run.py --source picam --gaze udp --headless --stream 8080                     # everything on the Pi
+  python run.py --source qnx --gaze qnx                              # the QNX rig: scene camera + gaze
+  python run.py --source qnx:192.168.2.2 --gaze qnx --stream 8080    # ...and serve the overlay to a browser
+  python run.py --source http://192.168.2.2:8081/stream --gaze udp   # any world camera + gaze over UDP
 
 Keys: q quit | 1/2/3 long blink left/right/both | x double blink | m colour view | f features | r record
       c depth-calibrate | p pause | s snapshot
-Env (or .env): OMNI_API_KEY (Maestro's decisions + voice), ELEVENLABS_API_KEY (fallback voice), SENTRY_DSN (optional)
+Env (or .env): OMNI_API_KEY (Maestro's decisions), ELEVENLABS_API_KEY (Maestro's voice), SENTRY_DSN (optional)
 """
 from __future__ import annotations
 
@@ -51,8 +52,10 @@ def obj_json(t, depth, w, h):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--source", default="0", help="camera index | video file | 'synthetic' | 'picam[:N]' | MJPEG URL")
-    ap.add_argument("--gaze", default="mouse", help="mouse | udp | synthetic | replay:<log.jsonl> | none")
+    ap.add_argument("--source", default="0", help="camera index | video file | 'synthetic' | 'qnx[:host]' "
+                                                  "(the QNX board's scene camera) | 'picam[:N]' | MJPEG URL")
+    ap.add_argument("--gaze", default="mouse", help="mouse | qnx[:host] (poll the QNX board directly) | udp "
+                                                    "(any tracker, see INTERFACE.md) | synthetic | replay:<log.jsonl> | none")
     ap.add_argument("--config", default="config.json")
     ap.add_argument("--send", default=None, help="host:port for events (default from config)")
     ap.add_argument("--record", action="store_true", help="start recording immediately")
@@ -75,7 +78,7 @@ def main():
     if args.no_net:
         cfg["shape_net"]["enabled"] = False
     tele = telemetry.init()
-    src = open_source(args.source)
+    src = open_source(args.source, cfg)
     gaze = open_gaze(args.gaze, cfg)
     net = shape_net.load(cfg)
     det, trk, sel = Detector(cfg, net), Tracker(cfg), Selector(cfg)
@@ -123,8 +126,11 @@ def main():
         return r
 
     menu = Menu(cfg, (lambda key: None) if args.no_audio else voice.prompt, assistant.submit, apply_local)
+    speaks = cfg["omni"]["speak_with"]
+    if speaks != "none" and speaks != "omni" and not voice.eleven.ok:
+        speaks = "local (no ELEVENLABS_API_KEY)"
     print(f"[maestro] {'offline defaults' if not assistant.client.key else assistant.client.model + ' via ' + assistant.client.url}"
-          f"  [voice] {'ElevenLabs' if voice.eleven.ok else 'local'} fallback, {len(voice.clips)} prompt clips", flush=True)
+          f"  [voice] {speaks}, {len(voice.clips)} prompt clips", flush=True)
 
     show = not args.headless
     view_mask = show_feat = paused = False
@@ -226,6 +232,7 @@ def main():
                 "fps": round(fps_ema, 1), "proc_ms": round(proc_ms, 1), "shape": backend,
                 "rejected": det.rejected,
                 "gaze_age_ms": gaze.age_ms() if hasattr(gaze, "age_ms") else None,
+                **({"tracker": gaze.health()} if hasattr(gaze, "health") else {}),
             },
         }
         if marker:
@@ -241,7 +248,10 @@ def main():
         want_snap = args.headless and args.snapshot_every and idx % args.snapshot_every == 0
         want_stream = stream is not None and stream.wants_frame()
         if show or want_snap or want_stream:
-            hud = [f"{fps_ema:4.1f} fps  proc {proc_ms:4.1f} ms  shape:{backend}  gaze:{gaze.name}  "
+            tr = gaze.health() if hasattr(gaze, "health") else None
+            link = "" if tr is None else (
+                f"  board:{'up' if tr['connected'] else 'DOWN'} {tr['infer_fps']:.0f}fps eyes:{tr['n']} pupil:{tr['pupil_ok']}")
+            hud = [f"{fps_ema:4.1f} fps  proc {proc_ms:4.1f} ms  shape:{backend}  gaze:{gaze.name}{link}  "
                    f"objs:{len(tracks)}  rejected:{det.rejected}  locks:{locks}  dwell {sel.p['dwell_s']:.2f}s",
                    ("REC " if rec else "") + ("PAUSED " if paused else "") + ("EYES CLOSED " if closed else "") +
                    (f"depth ref {cfg['depth']['ref_distance_cm']}cm" if cfg['depth']['ref_distance_cm'] else "depth: uncalibrated (c)")

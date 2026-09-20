@@ -3,8 +3,8 @@
 1. Every pixel's (hue, saturation) is mapped through a lookup table to the nearest registered colour
    prototype (or to nothing: the grey table, shadows, glare). One gather, ~1-2 ms at 640x480.
 2. Per colour: clean the mask, take outer contours = candidate objects.
-3. Each candidate's crop goes through the shape net (ONNX), which says round/square/cylinder, or
-   "reject" for hands, scraps, pens. Without a model, contour-geometry rules decide the shape.
+3. Each candidate's crop goes through the shape net (ONNX), which says round/square/cylinder/triangle,
+   or "reject" for hands, scraps, pens. Without a model, contour-geometry rules decide the shape.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ NONE = 255  # LUT value for "no colour"
 @dataclass
 class Detection:
     color: str
-    shape: str               # "round" | "square" | "cylinder"
+    shape: str               # "round" | "square" | "cylinder" | "triangle"
     shape_conf: float        # net probability, or 1.0/0.5 for rule match/fallback
     contour: np.ndarray      # Nx1x2 int32, process-resolution pixels
     cx: float
@@ -87,9 +87,17 @@ def shape_features(contour: np.ndarray, poly_eps: float) -> dict:
 
 
 def classify_shape(f: dict, p: dict) -> tuple:
-    """Rule fallback when no shape net is available."""
+    """Rule fallback when no shape net is available.
+
+    Triangle is tested before square, because the square rule's "few vertices and solid" branch would
+    otherwise swallow it. A triangle is the shape that fills least of both the circle around it and the
+    rect around it; a cylinder can have a similar circlefill but nearly fills its rect, which is what
+    triangle_max_rectfill separates.
+    """
     if f["circlefill"] >= p["round_min_circlefill"] and f["aspect"] < p["cylinder_min_aspect"]:
         return "round", 1.0
+    if f["circlefill"] <= p["triangle_max_circlefill"] and f["rectfill"] <= p["triangle_max_rectfill"]:
+        return "triangle", 1.0
     if f["aspect"] < p["square_max_aspect"] and (
         f["rectfill"] >= p["square_min_rectfill"]
         or (f["vertices"] <= p["square_max_vertices"] and f["solidity"] >= p["square_min_solidity"])

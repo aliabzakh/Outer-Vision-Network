@@ -1,4 +1,4 @@
-"""Learned shape classifier (round / square / cylinder / reject) on object crops.
+"""Learned shape classifier (round / square / cylinder / triangle / reject) on object crops.
 
 Runs the ONNX export through OpenCV DNN (no extra dependency); ~0.3 ms per crop on a laptop.
 Input: Nx3xSxS float RGB in 0..255 (the model divides by 255 itself).

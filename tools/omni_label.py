@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from outer_vision import config, omni, shape_net  # noqa: E402
 
-LABELS = ["round", "square", "cylinder", "reject"]
+LABELS = ["round", "square", "cylinder", "triangle", "reject"]
 TILE, GRID = 160, 4
 
 PROMPT = """You label training images for a shape classifier. The picture is a 4x4 sheet of numbered tiles.
@@ -36,6 +36,7 @@ For EVERY tile number, pick one label for the object in the CENTRE of the tile:
 - round: a ball/sphere, or a flat round disc or puck
 - square: a cube or box-like block (flat faces, corners), from any angle
 - cylinder: a can, tube, cup or roll (straight parallel sides with round ends), standing or lying down
+- triangle: a wedge, a folded card, a triangular block or prism: the outline is a triangle, three corners
 - reject: anything else: a hand, fingers, arm, pen, paper, cable, shadow, several objects, an object cut off
   so its shape can't be told, or nothing clear
 - unsure: you can't tell between two of the above

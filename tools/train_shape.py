@@ -6,7 +6,7 @@ Runs on the Mac in the training env (torch is NOT needed at runtime):
   .venv-train/bin/python tools/train_shape.py                      # synthetic only (bootstrap)
   .venv-train/bin/python tools/train_shape.py --real data/real     # + crops from collect.py / omni_label.py
 
-Real crops live in data/real/<round|square|cylinder|reject>/*.png and are weighted up.
+Real crops live in data/real/<round|square|cylinder|triangle|reject>/*.png and are weighted up.
 --arch mobilenet (default): ImageNet-pretrained MobileNetV3-small at 96 px, 1.5M params. Pretrained
   features carry over from synthetic renders to real objects far better than a net trained from scratch.
   ~1.2 ms/crop in OpenCV on the Mac.
@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from outer_vision import synthetic  # noqa: E402
 
-LABELS = ["round", "square", "cylinder", "reject"]
+LABELS = ["round", "square", "cylinder", "triangle", "reject"]
 SIZE = 64          # set from --arch in main()
 ARCH_SIZE = {"tiny": 64, "mobilenet": 96}
 
@@ -55,8 +55,8 @@ class ShapeCNN(nn.Module):
 
 
 class PretrainedNet(nn.Module):
-    """MobileNetV3-small (ImageNet weights) with a new 4-way head. Takes the same input as ShapeCNN
-    (RGB 0..255) and normalises inside, so the runtime (shape_net.py) doesn't change."""
+    """MobileNetV3-small (ImageNet weights) with a new head, one logit per LABELS entry. Takes the same
+    input as ShapeCNN (RGB 0..255) and normalises inside, so the runtime (shape_net.py) doesn't change."""
 
     def __init__(self, n=len(LABELS)):
         super().__init__()

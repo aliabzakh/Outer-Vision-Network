@@ -6,20 +6,32 @@ import json
 import socket
 import threading
 import time
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-from . import synthetic
+from . import gaze_model, synthetic
 from .blink import BlinkDetector
 
 
 # ---------------------------------------------------------------- frame sources
+def scene_url(host: str, port=8081) -> str:
+    """The QNX board's scene (world) camera: camera_streamer --no-infer serves MJPEG at /stream.mjpg."""
+    return f"http://{host}:{port}/stream.mjpg"
+
+
+def state_url(host: str, port=8080) -> str:
+    """The QNX board's eye camera: face mesh, iris and the dark-pupil fit, as JSON."""
+    return f"http://{host}:{port}/api/state"
+
+
 class CameraSource:
-    """Live camera: int index, or any URL/string cv2.VideoCapture accepts, e.g. the Pi's MJPEG stream
-    http://<pi>.local:8081/stream from tools/pi_camera_server.py."""
+    """Live camera: int index, or any URL/string cv2.VideoCapture accepts, e.g. the QNX board's scene
+    stream http://<board>:8081/stream.mjpg, or http://<pi>:8081/stream from tools/pi_camera_server.py."""
     live = True
 
     def __init__(self, spec, width=640, height=480, fps=30):
@@ -93,9 +105,14 @@ class PicamSource:
         self.cam.stop()
 
 
-def open_source(spec: str):
+def open_source(spec: str, cfg: dict | None = None):
+    """spec: "synthetic" | "qnx[:host]" | "picam[:N]" | camera index | video file | any URL."""
     if spec == "synthetic":
         return SyntheticSource()
+    if spec == "qnx" or spec.startswith("qnx:"):
+        q = (cfg or {}).get("qnx", {})
+        host = spec.split(":", 1)[1] if ":" in spec else q.get("host", "192.168.2.2")
+        return CameraSource(scene_url(host, q.get("scene_port", 8081)))
     if spec.startswith("picam"):
         return PicamSource(spec)
     if Path(spec).is_file():
@@ -193,6 +210,148 @@ class UdpGaze(NoGaze):
         return out
 
 
+class QnxGaze(NoGaze):
+    """Gaze straight from the QNX board, with no UDP hop: poll GET /api/state on the eye camera, run the
+    coaxial rig model (gaze_model.py), and turn eyelid openness into the per-eye state blinks are made of.
+
+    The board (htn-gaze, branch pupil-in-eye) runs MediaPipe Face Mesh and the dark-pupil fit in C on
+    QNX 8.0 and reports, per eye, the eyelid outline, the iris ring, the MediaPipe iris centre and the
+    dark-pupil centre. `state.n` is 0 or 2: either a face was found and both eyes are reported, or nothing
+    is. The model prefers the dark pupil and falls back to the iris centre, exactly as the eye team's GUI
+    does, so both views of the rig agree about where the wearer is looking.
+
+    Eye state, which is the user's ONLY way to give commands, needs care here:
+      * Openness has hysteresis (closed_below / open_above), so an eye hovering at the threshold can't
+        chatter and split one long blink into several short ones.
+      * Samples are fed to the BlinkDetector only when the board's landmarks actually CHANGED. If the
+        inference thread stalls while the camera keeps running, the repeated frame would otherwise look
+        like eyes held shut, and a stalled board would open menus by itself. A gap longer than
+        blink.max_sample_gap_s makes the detector discard the closure in progress, which is what we want.
+      * n == 0 (no face: looked away, or the tracker lost the eyes) feeds nothing at all, rather than
+        guessing "both closed": a lost face is not a command.
+    """
+    name = "qnx"
+
+    def __init__(self, host: str, cfg: dict):
+        q = cfg.get("qnx", {})
+        self.url = state_url(host, q.get("eye_port", 8080))
+        self.host = host
+        self.rig = gaze_model.rig_from(q.get("rig"))
+        self.lid = {"closed_below": 0.15, "open_above": 0.20, "min_open_for_gaze": gaze_model.MIN_OPEN_FOR_GAZE,
+                    **q.get("lid", {})}
+        sm = {"median": 5, "ema": 0.45, **q.get("smooth", {})}
+        self.smooth = gaze_model.Smoother(sm["median"], sm["ema"])
+        self.max_age = cfg["selector"]["gaze_max_age_s"]
+        self.period = 1.0 / max(1.0, float(q.get("poll_hz", 30.0)))
+        self.timeout = float(q.get("timeout_s", 0.5))
+        self.blink = BlinkDetector(cfg["blink"])
+        self._gestures = collections.deque()
+        self.latest = None            # (x, y, recv_monotonic)
+        self._last_sample = 0.0
+        self._closed = {"left": False, "right": False}
+        self._fingerprint = None      # last landmark values seen, to spot a stalled inference thread
+        self.count = 0                # fresh board samples seen; bumps once per new inference result
+        self.last_open = {"left": None, "right": None}   # lid openness, for tools/qnx_bridge.py --probe
+        self.last_yaw_deg = self.last_pitch_deg = 0.0    # aim, for tools/qnx_bridge.py --zero
+        self.stats = {"connected": False, "error": None, "n": 0, "camera_fps": 0.0, "infer_fps": 0.0,
+                      "on_image": False, "pupil_ok": 0}
+        threading.Thread(target=self._loop, daemon=True).start()
+
+    # -------------------------------------------------------------- polling
+    def _fetch(self):
+        with urllib.request.urlopen(self.url, timeout=self.timeout) as r:
+            return json.loads(r.read())
+
+    def _loop(self):
+        while True:
+            t0 = time.monotonic()
+            try:
+                self._handle(self._fetch(), time.monotonic())
+                self.stats["connected"], self.stats["error"] = True, None
+            except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+                self.stats["connected"] = False
+                self.stats["error"] = str(e)[:120]
+                self.latest = None
+                self.smooth.reset()
+            time.sleep(max(0.0, self.period - (time.monotonic() - t0)))
+
+    def _handle(self, state: dict, now: float):
+        eyes = state.get("eyes") or {}
+        self.stats.update(n=int(state.get("n") or 0), camera_fps=float(state.get("camera_fps") or 0.0),
+                          infer_fps=float(state.get("infer_fps") or 0.0))
+        if not eyes:                              # no face: no gaze, and nothing to say about the eyelids
+            self.latest = None
+            self.smooth.reset()
+            self.stats["on_image"] = False
+            return
+
+        fresh = self._is_fresh(eyes)
+        g = gaze_model.gaze_from_state(state, self.rig, self.lid["min_open_for_gaze"])
+        self.stats["on_image"] = bool(g["on_image"])
+        self.stats["pupil_ok"] = sum(1 for s in ("left", "right")
+                                     if (g["eyes"].get(s) or {}).get("pupil_ok"))
+        if g["ok"]:
+            self.latest = (*self.smooth.push(g["x"], g["y"]), now)
+            self.last_yaw_deg, self.last_pitch_deg = g["yaw_deg"], g["pitch_deg"]
+        else:
+            self.latest = None
+            self.smooth.reset()
+
+        if fresh:
+            for side in ("left", "right"):
+                e = eyes.get(side)
+                if isinstance(e, dict):
+                    self.last_open[side] = gaze_model.eye_open(e)
+                    self._closed[side] = self._eye_closed(side, self.last_open[side])
+            self._gestures.extend(self.blink.feed(now, self._closed["left"], self._closed["right"]))
+            self._last_sample = now
+            self.count += 1
+
+    def _is_fresh(self, eyes: dict) -> bool:
+        """Did the board's inference actually produce a new result since the last poll?"""
+        fp = tuple(tuple(eyes.get(s, {}).get(k) or ()) for s in ("left", "right")
+                   for k in ("iris", "pupil", "lid"))
+        if fp == self._fingerprint:
+            return False
+        self._fingerprint = fp
+        return True
+
+    def _eye_closed(self, side: str, open_ratio: float) -> bool:
+        if open_ratio < self.lid["closed_below"]:
+            return True
+        if open_ratio > self.lid["open_above"]:
+            return False
+        return self._closed[side]                 # in between: keep the last decision (hysteresis)
+
+    # -------------------------------------------------------------- gaze source interface
+    def get(self, frame_idx):
+        g = self.latest
+        if g is None or time.monotonic() - g[2] > self.max_age:
+            return None
+        return g[0], g[1]
+
+    def age_ms(self):
+        g = self.latest
+        return None if g is None else round((time.monotonic() - g[2]) * 1000, 1)
+
+    def eyes_closed(self, frame_idx):
+        return self.blink.closed and time.monotonic() - self._last_sample < self.max_age
+
+    def gestures(self, frame_idx):
+        out = []
+        while self._gestures:
+            out.append(self._gestures.popleft())
+        return out
+
+    @property
+    def closed(self) -> dict:
+        """Per-eye lid state right now, after hysteresis: what INTERFACE.md calls left_closed/right_closed."""
+        return dict(self._closed)
+
+    def health(self):
+        return dict(self.stats)
+
+
 class ReplayGaze(NoGaze):
     """Gaze, eye state and blink gestures from a recording's log.jsonl, matched by frame index."""
     name = "replay"
@@ -228,12 +387,16 @@ class SyntheticGaze(NoGaze):
 
 
 def open_gaze(spec: str, cfg: dict):
+    """spec: "none" | "mouse" | "udp" | "qnx[:host]" | "synthetic" | "replay:<log.jsonl>"."""
     if spec == "none":
         return NoGaze()
     if spec == "mouse":
         return MouseGaze()
     if spec == "udp":
         return UdpGaze(cfg["gaze_udp_port"], cfg["selector"]["gaze_max_age_s"], cfg["blink"])
+    if spec == "qnx" or spec.startswith("qnx:"):
+        host = spec.split(":", 1)[1] if ":" in spec else cfg.get("qnx", {}).get("host", "192.168.2.2")
+        return QnxGaze(host, cfg)
     if spec == "synthetic":
         return SyntheticGaze()
     if spec.startswith("replay:"):

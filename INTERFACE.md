@@ -5,6 +5,11 @@ inner camera (eye)  ──gaze + lids UDP :5005──►  outer vision (run.py) 
                             ◄── "markers" in state stream (for calibration) ──┘
 ```
 
+**Our rig doesn't use the UDP hop.** The eye half is a Raspberry Pi 5 on QNX 8.0 that answers HTTP polls
+rather than sending UDP, so `run.py --gaze qnx` polls it directly and converts in-process
+(`outer_vision/gaze_model.py`). Section 1 is still the contract for **any other tracker**, and
+`tools/qnx_bridge.py` speaks it on the QNX board's behalf when something besides `run.py` wants the gaze.
+
 All coordinates are **normalized world-camera image coordinates**: `x, y ∈ [0, 1]`, origin **top-left**,
 measured on the *outer* camera's full frame (any resolution / crop must be undone first).
 
@@ -24,8 +29,12 @@ One JSON object per datagram, as often as you have samples (30–120 Hz):
 | `conf` | optional, 0–1, currently logged only |
 | `t` | optional, sender clock; ignored (receive time is used) |
 
-Samples older than `selector.gaze_max_age_s` (0.2 s) are dropped. Reference sender: `tools/send_gaze.py`
-(`--at X Y --blink left|right|both|double` sends a gesture).
+Samples older than `selector.gaze_max_age_s` (0.2 s) are dropped. Reference senders: `tools/send_gaze.py`
+(`--at X Y --blink left|right|both|double` sends a gesture) and `tools/qnx_bridge.py` (the real QNX board).
+
+Send one datagram **per sample your tracker actually computed**, not per tick of a timer. Repeating the
+last result at a fixed rate makes a frozen tracker look like eyes held shut, which opens a menu by itself;
+a real gap is safe, because a gap longer than `blink.max_sample_gap_s` discards the closure in progress.
 
 **Blinks.** Outer vision turns the lid state into gestures (`outer_vision/blink.py`, thresholds in
 `config.json` → `blink`): closed < 0.4 s = natural blink (ignored; two within 0.7 s = **double blink**),
@@ -38,6 +47,10 @@ ignored. While any eye is closed the dwell timer is frozen, so blinking never pl
 - Keep sending samples during a blink: a gap > 0.25 s mid-closure discards the gesture.
 
 ## 2. Calibration pairing (outer vision provides)
+
+Only for trackers that learn a pupil→world mapping. The QNX rig doesn't: it uses a fixed-rig geometric
+model (`outer_vision/gaze_model.py`, `config.json` → `qnx.rig`) with the cameras' measured spacing, and
+only a one-off aim zero (`tools/qnx_bridge.py --zero`). No marker needed.
 
 Mapping pupil → world pixel needs world positions of calibration targets. Run
 `run.py --calib-marker`; the state stream then carries every visible ArUco marker (DICT_4X4_50, print with
@@ -63,13 +76,17 @@ Suggested procedure (one marker, no clicks): the user stares at the marker while
 ```
 
 `state.health` = `{fps, proc_ms, shape: "onnx"|"rules", rejected, gaze_age_ms}`. Use it for a "system OK" indicator; if `gaze_age_ms` is null or large,
-the gaze tracker is down.
+the gaze tracker is down. With `--gaze qnx` it also carries
+`tracker: {connected, error, n, camera_fps, infer_fps, on_image, pupil_ok}` straight from the board:
+`connected` false means the board is unreachable, `n` 0 means it can't see a face, and `pupil_ok` counts
+how many of the two dark-pupil fits succeeded this frame (2 is good, 0 means it's falling back to the
+iris centre).
 
 **`lock`**, once per visit when dwell completes. **This is the "play a note" trigger**:
 
 ```json
 {"type": "lock", "t": 12.71, "id": 4, "best_guess": false,
- "object": {"id": 4, "color": "green", "shape": "cylinder", "volume": 0.62, "note": "F4", "midi": 65, "instrument": "drum", ...},
+ "object": {"id": 4, "color": "green", "shape": "cylinder", "volume": 0.62, "note": "E4", "midi": 64, "instrument": "drum", ...},
  "lesson": {"title": "Mary Had a Little Lamb", "correct": true, "expected": "E4", "index": 3, "total": 7, "done": false}}
 ```
 `note`/`midi`/`instrument` already include the user's blink-menu changes, so the game just plays them
@@ -85,12 +102,14 @@ or `{"type":"gesture","kind":"double","focus":null}` (`focus` = object under gaz
 
 `state` also carries `eyes_closed`, `dwell_s`, `lesson` (with `next`: the note to look at),
 `menu: null | {state: object|space|space_lesson|swap_pick, focus, options: {left, right, both}}` and
-`assistant: {status: idle|thinking|speaking, caption, decide_ms, first_audio_ms, source}`.
+`assistant: {status: idle|thinking|speaking, caption, decide_ms, first_audio_ms, source, voice}`, where
+`source` is `omni` or `fallback` (who decided) and `voice` is `eleven`, `omni` or `local` (who spoke).
 
-- `color` → pitch, `shape` → instrument (`round` | `square` | `cylinder`), `volume` → loudness
+- `color` → pitch, `shape` → instrument (`round` | `square` | `cylinder` | `triangle`), `volume` → loudness
   (`null` until depth is calibrated; treat as 1.0).
-- Default notes (rainbow order): `red` C4, `orange` D4, `yellow` E4, `green` F4, `cyan` G4, `blue` A4,
-  `purple` B4, `pink` C5; instruments: round marimba, square piano, cylinder flute (`config.json` → `music`).
+- Default notes, C major pentatonic in rainbow order: `red` C4, `yellow` D4, `green` E4, `blue` G4,
+  `purple` A4; instruments: round marimba, square piano, cylinder flute, triangle bell
+  (`config.json` → `music`). All of it is config: read the actual mapping off `lock`, don't hard-code it.
 - To play the same object again the user must look away (> `grace_s`) and back.
 - `id` is stable while the object stays in view; it can change if the object leaves view for > 0.5 s.
 

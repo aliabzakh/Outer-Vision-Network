@@ -225,3 +225,15 @@ __marimo__/
 .venv-train/
 data/
 deploy/wheels/
+
+# Keys and seeds, wherever they turn up. Never relax these.
+**/.keys/
+*session_key.json
+*keypair.json
+
+# The Solana marketplace/wallet work lives on the solana-marketplace branch, not on main. Switching back
+# from that branch leaves these directories behind in the working tree (node_modules, minted songs and
+# the two key files above); ignoring them here keeps them off main.
+/marketplace/
+/wallet/
+/songs/

@@ -1,8 +1,9 @@
-"""Maestro's fixed lines (blink-menu prompts) and fallback speech.
+"""Maestro's voice: the fixed blink-menu lines, and speaking whatever OMNI decided to say.
 
 Prompts play from pre-generated clips (assets/voice/<key>.wav, made by tools/gen_audio.py with ElevenLabs),
-so the menu answers instantly and offline. Free text (OMNI's reply when its own voice fails) goes to live
-ElevenLabs TTS, then macOS `say` / espeak, so the user is never left without an answer.
+so the menu answers instantly and with no network. Free text goes to live ElevenLabs TTS, streamed so the
+first syllable starts early, and falls back to macOS `say` / espeak if ElevenLabs can't be reached: the
+user is never left without an answer. Clips and live speech use the same voice_id, so it is one voice.
 """
 from __future__ import annotations
 
@@ -46,6 +47,13 @@ class Voice:
         if missing:
             self.log(f"[voice] no clips for {missing}; run tools/gen_audio.py (using live/local speech meanwhile)")
 
+    @property
+    def can_speak(self) -> bool:
+        """True when live ElevenLabs speech is actually available (key present and a speaker to play it on).
+        Callers check this before say(), because say() falls back to local TTS rather than failing, and a
+        caller that treated that as a failure would end up saying the same sentence twice."""
+        return self.player is not None and self.eleven is not None and self.eleven.ok
+
     def prompt(self, key: str):
         """Speak a menu prompt now, cutting off anything still playing. Never blocks."""
         clip = self.clips.get(key)
@@ -55,14 +63,30 @@ class Voice:
         else:
             threading.Thread(target=self.say, args=(PROMPTS[key],), daemon=True).start()
 
-    def say(self, text: str):
-        """Speak free text; blocks until done."""
+    def say(self, text: str, tone=None, cut=False):
+        """Speak free text in Maestro's voice; blocks until done. Returns the monotonic time the first
+        audio reached the speaker, or None if it fell back to local TTS (which is not measurable here).
+
+        `cut=True` stops whatever is playing at the moment the first chunk arrives, so the "One moment"
+        clip is replaced by the real answer rather than queued behind it.
+        """
         if self.player is not None and self.eleven is not None and self.eleven.ok:
+            first = None
             try:
-                self.player.feed(self.eleven.tts(text))
+                for pcm in self.eleven.tts_stream(text, tone):
+                    if first is None:
+                        first = time.monotonic()
+                        if cut:
+                            self.player.stop()
+                    self.player.feed(pcm)
+            except ElevenError as e:
+                if first is None:
+                    self.log(f"[voice] ElevenLabs failed ({e}); using local speech")
+                else:
+                    self.log(f"[voice] ElevenLabs cut out ({e}); saying what arrived")
+            if first is not None:
                 while self.player.playing:
                     time.sleep(0.05)
-                return
-            except ElevenError as e:
-                self.log(f"[voice] ElevenLabs failed ({e}); using local speech")
+                return first
         local_say(text)
+        return None

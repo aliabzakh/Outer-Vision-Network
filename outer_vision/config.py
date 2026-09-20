@@ -11,17 +11,17 @@ DEFAULTS = {
     # fraction of this width, so tuning survives resolution changes.
     "process_width": 640,
     # Colour prototypes, OpenCV HSV (H 0-180, S/V 0-255): each pixel goes to the NEAREST prototype.
-    # Register real values per object with tools/tune_colors.py (click the object). Rainbow order =
-    # suggested scale C D E F G A B C'. "bgr" is only the debug-overlay colour.
+    # Register real values per object with tools/tune_colors.py (click the object). Five well-separated
+    # hues, in rainbow order = the C major pentatonic scale (see "music"). Five rather than eight because
+    # neighbouring hues (red/orange, blue/cyan, purple/pink) are what the colour LUT confuses under venue
+    # lighting, and because a pentatonic scale has no semitone clashes: any order of looks sounds musical.
+    # "bgr" is only the debug-overlay colour.
     "colors": {
         "red":    {"hsv": [0, 200, 170],   "bgr": [40, 40, 230]},
-        "orange": {"hsv": [12, 210, 220],  "bgr": [20, 120, 245]},
         "yellow": {"hsv": [27, 200, 210],  "bgr": [40, 220, 240]},
         "green":  {"hsv": [62, 170, 150],  "bgr": [60, 200, 60]},
-        "cyan":   {"hsv": [90, 180, 170],  "bgr": [220, 210, 40]},
         "blue":   {"hsv": [110, 200, 170], "bgr": [230, 120, 40]},
         "purple": {"hsv": [135, 150, 140], "bgr": [180, 60, 150]},
-        "pink":   {"hsv": [165, 140, 210], "bgr": [180, 120, 245]},
     },
     "color_match": {
         "s_min": 90,        # below this saturation = table/glare/shadow, never an object
@@ -47,6 +47,11 @@ DEFAULTS = {
         "square_max_vertices": 6,
         "square_min_solidity": 0.90,
         "cylinder_min_aspect": 1.25,
+        # A triangle inscribed in its circumcircle fills ~0.41 of it, far below a circle (1.0), a square
+        # (~0.72) or a cylinder (>=0.62), and it fills little of its bounding rect. Vertex count is NOT a
+        # usable signal: morphology rounds the apex, so real triangles come out with 4-5 hull vertices.
+        "triangle_max_circlefill": 0.62,
+        "triangle_max_rectfill": 0.81,
         "border_margin": 3,           # px; contours touching the frame edge are flagged partial
     },
     "tracker": {
@@ -73,9 +78,9 @@ DEFAULTS = {
         "min_volume": 0.2,
     },
     "music": {
-        "notes": {"red": "C4", "orange": "D4", "yellow": "E4", "green": "F4",
-                  "cyan": "G4", "blue": "A4", "purple": "B4", "pink": "C5"},
-        "instruments": {"round": "marimba", "square": "piano", "cylinder": "flute"},
+        # C major pentatonic: C D E G A. No semitones, so no two objects can clash.
+        "notes": {"red": "C4", "yellow": "D4", "green": "E4", "blue": "G4", "purple": "A4"},
+        "instruments": {"round": "marimba", "square": "piano", "cylinder": "flute", "triangle": "bell"},
         "available_instruments": ["piano", "marimba", "flute", "strings", "bell", "drum", "synth"],
     },
     "omni": {
@@ -83,7 +88,11 @@ DEFAULTS = {
         "base_url": "https://yibuapi.com/v1",
         "model": "qwen3.5-omni-flash",
         "voice": "Serena",
-        "speak_with": "omni",          # "omni" (model's own voice) | "fallback" (ElevenLabs/local) | "none"
+        # Who speaks Maestro's replies. "eleven": ElevenLabs, the same voice as the menu prompt clips,
+        # streamed (default). "omni": the model reads its own reply back, one round trip fewer but a
+        # second voice in the demo. "none": captions only. Whichever is chosen, the other engine and then
+        # local TTS stand behind it. ("fallback" is the old name for "eleven" and still works.)
+        "speak_with": "eleven",
         "timeout_s": 10.0,             # after this the command falls back to the offline default
         "retries": 1,                  # a reply that doesn't fit the command is sent back once with the reason
         "history_turns": 6,
@@ -105,6 +114,42 @@ DEFAULTS = {
         # live fallback speech. voice_id: premade "Rachel"; override with env ELEVENLABS_VOICE_ID.
         "voice_id": "21m00Tcm4TlvDq8ikWAM",
         "tts_model": "eleven_flash_v2_5",
+    },
+    "qnx": {
+        # The eye-tracking half: a Raspberry Pi 5 running QNX 8.0 with two Camera Module 3 cameras
+        # (htn-gaze repo, branch pupil-in-eye). `camera_streamer` is C/C++ on the board and serves the eye
+        # camera with MediaPipe Face Mesh + the dark-pupil fit on :8080, and the scene camera as video
+        # only on :8081. run.py polls the first and reads the second; nothing of this repo runs on QNX.
+        "host": "192.168.2.2",
+        "eye_port": 8080,              # GET /api/state, GET /api/frame.jpg
+        "scene_port": 8081,            # GET /stream.mjpg  (camera_streamer --no-infer)
+        "poll_hz": 30.0,               # the board infers at 10-30 fps; polling faster just repeats frames
+        "timeout_s": 0.5,
+        # Fixed-rig geometry, in millimetres/degrees. Mirrors DEFAULT_RIG in the eye repo's
+        # gui/src/geometry.js: keep the two the same or the GUI's reticle and our notes disagree.
+        "rig": {
+            "eye_distance_mm": 80.0,   # eye camera to the corneas
+            "baseline_mm": 25.0,       # scene camera behind the eye camera
+            "eyeball_radius_mm": 12.0,
+            "hfov_deg": 66.0,          # Camera Module 3 standard lens
+            "scene_depth_mm": 1500.0,  # plane the gaze ray is intersected with
+            "kappa_deg": 5.0,          # visual axis vs pupillary axis
+            "flip_x": False,           # set if a camera is mounted inverted (GUI keys X / Y)
+            "flip_y": False,
+            "scene_w": 960,            # start_streamers.sh runs both cameras at 960x540
+            "scene_h": 540,
+            "zero_yaw_deg": 0.0,       # residual aim; measure with tools/qnx_bridge.py --zero
+            "zero_pitch_deg": 0.0,
+        },
+        # Eyelid openness (height/width of the eyelid outline) -> eye closed. Depends on the wearer and on
+        # where the eye camera sits: read live values with tools/qnx_bridge.py --probe. Two thresholds, so
+        # an eye resting near the boundary can't chatter and break one long blink into several short ones.
+        "lid": {
+            "closed_below": 0.15,
+            "open_above": 0.20,
+            "min_open_for_gaze": 0.08,  # below this an eye is left out of the two-eye gaze average
+        },
+        "smooth": {"median": 5, "ema": 0.45},   # same filter as the eye repo's gui/src/useGaze.js
     },
     "gaze_udp_port": 5005,
     "events": {"host": "127.0.0.1", "port": 5006},

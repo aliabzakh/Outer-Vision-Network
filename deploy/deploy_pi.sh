@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# Run on the Mac: copy the code to the Pi and set it up.
-#   deploy/deploy_pi.sh <user>@192.168.2.2 [remote_dir]
-# Needs key-based SSH first:  ssh-copy-id <user>@192.168.2.2
+# Run on the Mac: copy the code to a RASPBERRY PI OS board and set it up.
+#   deploy/deploy_pi.sh <user>@<pi> [remote_dir]
+# Needs key-based SSH first:  ssh-copy-id <user>@<pi>
+#
+# NOT for the QNX board. Our rig's Pi 5 runs QNX 8.0 and has no picamera2 and no CPython environment for
+# this repo; there, the board runs only the eye team's C/C++ camera_streamer and run.py stays on the
+# laptop (README -> "The rig"). This script is for a spare Pi OS board used as a plain world camera.
 set -euo pipefail
 TARGET=${1:?usage: deploy/deploy_pi.sh user@192.168.2.2 [remote_dir]}
 DEST=${2:-outer-vision}
