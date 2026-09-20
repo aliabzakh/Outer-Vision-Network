@@ -81,7 +81,7 @@ Redo one sound only:
 .venv/bin/python tools/gen_audio.py --force --only bell
 ```
 
-Listen to all of them:
+Listen to all of them (this also doubles as the speaker check — see [§2a](#2a-first-check-you-can-actually-hear-something)):
 
 ```bash
 .venv/bin/python tools/synth.py --test
@@ -93,19 +93,59 @@ Listen to all of them:
 
 Do this before you touch the board. It proves the laptop half works.
 
-Terminal 1 — the sound:
+> **Some commands here are meant to keep running.** `tools/synth.py` and `run.py` are not scripts that
+> finish — they start, print a line or two, and then sit there until you press Ctrl-C. **A terminal that
+> looks frozen is a terminal that is working.** Give each one its own tab.
+
+### 2a. First, check you can actually hear something
+
+```bash
+.venv/bin/python tools/synth.py --test
+```
+
+This plays three notes on each of the seven instruments and then exits on its own, in about 12 seconds.
+**You should hear it right away.**
+
+Heard nothing?
+
+- Check **System Settings → Sound → Output**: the right device, and the volume up.
+- Other apps (Zoom, a DAW, another copy of this) can hold the audio device. Quit them.
+- If it printed `no speaker: ...`, that's the real error — the device couldn't be opened at all.
+
+Don't go further until you can hear this. Everything below assumes the speaker works.
+
+### 2b. Start the sound server — then leave it alone
 
 ```bash
 .venv/bin/python tools/synth.py
 ```
 
-Terminal 2 — a fake table and fake eyes:
+**This one does not exit, and it does not make any sound by itself.** It binds UDP port 5006 and waits for
+`run.py` to tell it which notes to play. It should print:
+
+```
+samples: ['bell', 'drum', 'fanfare', 'flute', 'marimba', 'piano', 'strings', 'synth']
+synth listening on udp :5006  --  ready, and SILENT until run.py plays a note.
+```
+
+If that is all you see, it is working correctly. **Leave this terminal open** and open a new one.
+
+### 2c. Now start the instrument, in a second terminal
 
 ```bash
 .venv/bin/python run.py --source synthetic --gaze synthetic --realtime
 ```
 
-You should hear notes and see a window with five outlined objects and a white gaze circle.
+Now you get sound: a window opens with five outlined objects and a white gaze circle that moves between
+them, and a note plays each time it settles on one. Back in the first terminal, a line appears per note:
+
+```
+  C4 marimba  vol 1.00
+  G4 piano    vol 1.00
+```
+
+If the window appears and notes print in terminal 1 but you hear nothing, the problem is the speaker, not
+this repo — go back to 2a.
 
 Use your **mouse as the eyes** and the keyboard as blinks:
 
@@ -325,13 +365,15 @@ Until you do this, `volume` is `null` and everything plays at full loudness.
 
 ## 7. Run the real thing
 
-Terminal 1 — sound:
+Two terminals. **Both stay running** until you stop them — see the note in [§2](#2-run-it-with-no-hardware).
+
+Terminal 1 — sound. Prints two lines and then waits, silently, for notes:
 
 ```bash
 .venv/bin/python tools/synth.py
 ```
 
-Terminal 2 — the instrument:
+Terminal 2 — the instrument. This is what makes the sound happen:
 
 ```bash
 .venv/bin/python run.py --source qnx --gaze qnx
@@ -438,7 +480,8 @@ ssh qnxuser@192.168.2.2 'sh ~/gazecomp/scripts/start_streamers.sh'
 .venv/bin/python tools/synth.py --test
 ```
 
-Then run it for real ([§7](#7-run-the-real-thing)) and play one note of each colour.
+That last one is the speaker check and exits by itself. Then run it for real ([§7](#7-run-the-real-thing))
+— `tools/synth.py` with no flags in one terminal, `run.py` in another — and play one note of each colour.
 
 ---
 
@@ -660,4 +703,8 @@ The historical debugging log for that path is in [PI_DEBUGGING.md](PI_DEBUGGING.
 | Everything plays at full volume | depth never calibrated | §6b, press `c` |
 | Maestro says the same thing every time | no `OMNI_API_KEY`, so it's using offline defaults | check `.env`; `tools/omni_check.py` |
 | Maestro speaks in a different voice than the menu | no `ELEVENLABS_API_KEY`, falling back to OMNI's voice | check `.env` |
-| No sound at all | `tools/synth.py` isn't running | start it; test with `--test` |
+| `tools/synth.py` prints two lines then "hangs" | that is correct — it is a server waiting for notes | leave it running; start `run.py` in another terminal |
+| No sound, but notes print in the synth terminal | the Mac's output device or volume | System Settings → Sound → Output; quit apps holding the device |
+| No sound and nothing prints in the synth terminal | `run.py` isn't sending, or is sending elsewhere | check `run.py` is running; both must agree on port 5006 (`--send host:port`) |
+| `no speaker: ...` on startup | the audio device couldn't be opened | another app is holding it, or no output device is selected |
+| No sound at all | `tools/synth.py` isn't running | start it; test the speaker with `tools/synth.py --test` |
