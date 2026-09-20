@@ -225,12 +225,43 @@ actually happen:
 
 **If it found nothing at all**, the cable, the adapter, or the board's power is the problem.
 
+### Read the lights on the board first
+
+Before debugging the network at all, look at the Pi. The lights tell you whether it is even booting, and
+that decides whether the problem is the network or the board.
+
+| What you see | What it means | What to do |
+|---|---|---|
+| **Green** light (flickering) | it found a bootable card and is running | the board is fine — debug the network |
+| Green + amber at the **Ethernet socket** | link is up and passing traffic | the cable and adapter are fine |
+| **Red only, no green** | it has power but is **not booting** | it is not a network problem. See below |
+| No light at all | no power reaching it | cable, charger, or the socket |
+
+**Red with no green means the board never started.** The network can look alive for a while anyway — the
+Ethernet PHY holds link on its own power — so you can chase a "network problem" that does not exist.
+Two things cause it, in this order:
+
+1. **Not enough power** (much the most common — see below).
+2. **The SD card.** The bootloader could not find something to boot: card not seated, or the QNX image on
+   it is damaged. Reseat the card. If it is still red with a known-good power supply, suspect the card.
+
+Fastest way to tell them apart: **unplug both cameras and power it up.** That roughly halves the draw. If
+it goes green without cameras and red with them, it is power.
+
 ### ⚠️ Power is the most common cause
 
-The Pi 5 with two cameras needs a real **5 V / 5 A (27 W)** USB-C supply. A laptop USB-C port, a dock, or
-a phone charger is not enough. Under-powered, it will often boot far enough to bring up Ethernet and then
-stop responding — which looks exactly like a network problem and isn't one. Both repos record the board
-dropping off the network with normal temperature and free memory just beforehand.
+The Pi 5 with two cameras needs a real **5 V / 5 A (27 W)** USB-C supply — in practice, the official
+Raspberry Pi 27 W PSU. Note that most USB-C PD chargers do **not** offer the 5 V / 5 A profile: a generic
+laptop charger negotiates 5 V / 3 A, which boots a bare Pi 5 but leaves little headroom once two cameras
+are attached.
+
+**Do not power the board from the docking station or the laptop.** A dock's downstream port is the worst
+case — it shares a budget with everything else plugged into it. Run the Ethernet cable through the dock
+if you like (that is only data, and it works fine), but power must come from its own charger.
+
+Under-powered, the board will often boot far enough to bring up Ethernet and then stop responding — which
+looks exactly like a network problem and isn't one. Both repos record it dropping off the network with
+normal temperature and free memory just beforehand.
 
 Power it from a proper charger, then watch for it to come back:
 
@@ -733,6 +764,8 @@ The historical debugging log for that path is in [PI_DEBUGGING.md](PI_DEBUGGING.
 
 | Symptom | Most likely cause | Do this |
 |---|---|---|
+| **Red light on the board, no green** | it has power but is not booting — not a network fault | 27 W supply; reseat the SD card; try it with the cameras unplugged |
+| Ethernet socket lights went out, `status: inactive` | the board stopped driving the link — it is off or hung | check the board's lights before anything else |
 | Can't ping the board at all | it is probably on a link-local `169.254.x.x` address, not `192.168.2.2` | `tools/find_board.py` — it finds it and prints the fix |
 | Ping times out but the Ethernet link is "active" | an active link only means the PHY has power; the board itself can be wedged | repower from a 5 V / 5 A supply, then `tools/find_board.py --watch` |
 | Board answers nothing, and no SSH either | under-powered, or it never finished booting | proper 27 W supply; serial console if it stays dead |
