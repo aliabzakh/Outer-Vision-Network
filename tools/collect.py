@@ -39,7 +39,7 @@ def main():
     cfg = config.load(args.config)
     cfg["shape_net"]["enabled"] = False   # rules/net are irrelevant here: every candidate gets the session label
     det, trk = Detector(cfg), Tracker(cfg)
-    src = open_source(args.source)
+    src = open_source(args.source, cfg)
     out = Path(args.out or "data/real") / args.label if args.label != "auto" else Path(args.out or "data/unlabeled")
     out.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%H%M%S")

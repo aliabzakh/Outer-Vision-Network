@@ -6,6 +6,8 @@
 > applies to the QNX board; the QNX notes live in the eye repo's `pi/README.md`. What is still useful here
 > is the Ethernet setup on the Mac side and the power finding in row 4 — the QNX board has shown the same
 > symptom, so use a proper 5 V / 5 A supply.
+>
+> **For how to actually set up and run the rig today, see [SETUP.md](SETUP.md).**
 
 *As of 2026-09-19, ~10:30. Goal: get the code onto the Pi and verify the camera, speed and tests.*
 

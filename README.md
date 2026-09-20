@@ -14,6 +14,7 @@ serves the eye camera on `:8080` and the scene camera on `:8081`. Nothing in thi
 `run.py` runs on the laptop and reads both (`--source qnx --gaze qnx`). Any other tracker can send gaze
 over UDP instead (INTERFACE.md).
 
+- **Setting it up, running it, testing it, training the net, saving your work: [docs/SETUP.md](docs/SETUP.md)** — start here
 - Interfaces (gaze + eye state in, events out): **[INTERFACE.md](INTERFACE.md)**
 - Shortcuts and their proper versions: **[COMPROMISES.md](COMPROMISES.md)** · Decisions, prizes: **[SPEC.md](SPEC.md)**
 
@@ -111,6 +112,8 @@ Simulate the eye tracker: `tools/send_gaze.py --at 0.4 0.6 --blink both` (then `
    `run.py --source recordings/<ts>/world.mp4 --gaze replay:recordings/<ts>/log.jsonl`
 
 ## The rig: a Raspberry Pi 5 running QNX 8.0
+*Step-by-step version, with every command: **[docs/SETUP.md](docs/SETUP.md)**.*
+
 Both cameras are on the board and **the board runs QNX, not Pi OS**. Everything on it is the C/C++
 `camera_streamer` from the eye repo ([htn-gaze](https://github.com/pranaycv/htn-gaze), branch
 `pupil-in-eye`), which had to port MediaPipe to run there at all: prebuilt TFLite libraries for QNX

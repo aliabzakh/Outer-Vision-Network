@@ -31,7 +31,7 @@ def main():
     cfg = config.load(args.config)
     cfg["shape_net"]["enabled"] = False
     names = list(cfg["colors"])
-    src = open_source(args.source)
+    src = open_source(args.source, cfg)
     st = {"sel": 0, "frame": None, "det": Detector(cfg)}
 
     def on_click(event, x, y, *_):
